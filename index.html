@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Racik — AI Meal Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<body>
+
+<div class="topbar" id="onboardingTopbar">
+  <div class="brand">
+    <div class="brand-mark">R</div>
+    <div class="brand-name">racik</div>
+  </div>
+  <div class="lang-toggle" role="group" aria-label="Language">
+    <button type="button">ID</button>
+    <button class="active" type="button">EN</button>
+  </div>
+</div>
+
+<nav class="stepper" aria-label="Progress" id="onboardingStepper">
+  <div class="step active" data-step="1"><div class="dot">1</div><span class="label">Location</span></div>
+  <div class="sep"></div>
+  <div class="step" data-step="2"><div class="dot">2</div><span class="label">Parameters</span></div>
+</nav>
+
+<div class="app" id="onboardingApp">
+
+  <!-- ============ SCREEN 1 : LANDING ============ -->
+  <section class="screen active" id="screen-1">
+    <div class="landing">
+      <div>
+        <h1>Menu chaos,<br><em>Racik</em> sorts it.</h1>
+        <p class="sub">AI-powered meal planning for MBG kitchens — optimizing cost and nutrition while keeping regional flavors, complete with ready-to-follow recipes for your kitchen.</p>
+
+        <div class="loc-field">
+          <span class="pin">📍</span>
+          <input type="text" id="locationInput" placeholder="Enter a city or region…" autocomplete="off">
+          <button type="button" id="startBtn">Start Planning</button>
+          <div class="suggestions" id="locSuggestions">
+            <button type="button">Bandung, West Java</button>
+            <button type="button">Makassar, South Sulawesi</button>
+            <button type="button">Medan, North Sumatra</button>
+            <button type="button">Yogyakarta, D.I. Yogyakarta</button>
+          </div>
+        </div>
+        <p class="helper-note">💡 Location helps Racik adjust to regional ingredient prices and recommend dishes that are familiar to local residents.</p>
+      </div>
+      <div class="landing-visual" aria-hidden="true">
+        <div class="tray-hero">
+          <div class="plate p1"><svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="78" rx="34" ry="6" fill="#1F2B22" opacity="0.08"/><path d="M32 55 C28 40 38 24 52 24 C66 24 74 38 70 54 C68 62 62 70 55 74 L45 74 C38 70 34 63 32 55 Z" fill="#C0392B"/><path d="M40 40 C42 34 48 30 54 31 C60 32 64 38 62 45" stroke="#7A2018" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+          <div class="plate p2"><svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="50" cy="58" rx="30" ry="15" fill="#5B3418"/><ellipse cx="40" cy="56" rx="9" ry="6" fill="#3F2410"/><ellipse cx="60" cy="52" rx="8" ry="6" fill="#3F2410"/></svg></div>
+          <div class="plate p3"><svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M30 60 Q26 44 36 32 Q40 44 38 58 Z" fill="#3F6B4F"/><path d="M46 62 Q40 42 52 26 Q58 42 54 60 Z" fill="#4F7D5C"/><path d="M62 60 Q60 44 70 34 Q74 46 68 58 Z" fill="#3F6B4F"/><circle cx="42" cy="66" r="4" fill="#E8A33D"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN 2 : PARAMETERS ============ -->
+  <section class="screen" id="screen-2">
+    <div class="params-wrap">
+      <div class="card">
+        <div class="field-group">
+          <h3>Menu duration</h3>
+          <p class="field-hint">How many days per week would you like to plan for?</p>
+          <div class="chip-row" id="durationChips">
+            <button class="chip" data-val="3">3 days</button>
+            <button class="chip selected" data-val="5">5 days (weekdays)</button>
+            <button class="chip" data-val="7">7 days</button>
+            <button class="chip" data-val="custom">Custom (pick days &amp; weeks)</button>
+          </div>
+
+          <div class="custom-recurrence" id="customRecurrence">
+            <div class="cr-row">
+              <span class="cr-label">Repeat for</span>
+              <div class="cr-stepper">
+                <button type="button" id="crWeeksDec">−</button>
+                <span class="cr-count" id="crWeeksCount">2</span>
+                <button type="button" id="crWeeksInc">+</button>
+              </div>
+              <span class="cr-label">week(s)</span>
+            </div>
+            <div class="cr-row" style="margin-top:14px;">
+              <span class="cr-label">Repeat on</span>
+            </div>
+            <div class="day-picker" id="dayPicker">
+              <button class="dp-day" data-day="M">M</button>
+              <button class="dp-day" data-day="T1">T</button>
+              <button class="dp-day" data-day="W">W</button>
+              <button class="dp-day" data-day="T2">T</button>
+              <button class="dp-day" data-day="F">F</button>
+              <button class="dp-day" data-day="S1">S</button>
+              <button class="dp-day" data-day="S2">S</button>
+            </div>
+            <p class="field-hint" style="margin-top:12px; margin-bottom:0;">Racik will generate a tray for every selected day, across the number of weeks chosen.</p>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3>Budget</h3>
+          <p class="field-hint">Enter a total budget, or a budget per portion per meal.</p>
+          <div class="budget-row">
+            <div class="input-box">
+              <span class="cur">Rp</span>
+              <input type="text" id="budgetInput" value="3,500,000" inputmode="numeric">
+            </div>
+            <div class="toggle-pair">
+              <button class="active" data-mode="total">Total</button>
+              <button data-mode="per">Per Portion</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3>Number of people</h3>
+          <p class="field-hint">Number of beneficiaries the meals will be prepared for.</p>
+          <div class="stepper-input">
+            <button type="button" id="decPeople">−</button>
+            <span class="count" id="peopleCount">120</span>
+            <button type="button" id="incPeople">+</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3>Allergy / preference notes <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
+          <p class="field-hint">E.g. avoid peanuts, reduce spicy food, add more vegetarian options.</p>
+          <textarea placeholder="Write any notes here…"></textarea>
+        </div>
+      </div>
+
+      <div class="card summary-card">
+        <h3>Summary</h3>
+        <div class="summary-row"><span>Location</span><span class="v" id="sumLocation">—</span></div>
+        <div class="summary-row"><span>Duration</span><span class="v" id="sumDuration">5 days (weekdays)</span></div>
+        <div class="summary-row"><span>Budget</span><span class="v">Rp 3,500,000</span></div>
+        <div class="summary-row"><span>People</span><span class="v" id="sumPeople">120</span></div>
+        <div class="summary-row"><span>Estimated / portion</span><span class="v" id="sumPerPortion">≈ Rp 9,700</span></div>
+        <button class="cta-primary" id="generateBtn">✨ Generate Meal Plan</button>
+      </div>
+    </div>
+
+    <div class="loading-panel" id="loadingPanel">
+      <div class="loader-plate" aria-hidden="true"></div>
+      <p>Cooking up the best menu for your area…</p>
+    </div>
+  </section>
+
+</div>
+
+<div class="app-shell" id="appShell" style="display:none;">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">R</div>
+      <div class="brand-name-block">
+        <span class="brand-name">racik</span>
+        <span class="brand-sub">MBG Kitchen</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav" aria-label="Main navigation">
+      <button class="nav-item active" data-tab="plan">
+        <span class="nav-icon">🗓️</span>
+        <span class="nav-text"><span class="nav-label">Meal Plan</span><span class="nav-desc">Plan</span></span>
+      </button>
+      <button class="nav-item" data-tab="procurement">
+        <span class="nav-icon">📋</span>
+        <span class="nav-text"><span class="nav-label">Procurement</span><span class="nav-desc">Shopping list</span></span>
+      </button>
+      <button class="nav-item" data-tab="inventory">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text"><span class="nav-label">Stock &amp; Audit</span><span class="nav-desc">Inventory</span></span>
+      </button>
+      <button class="nav-item" data-tab="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text"><span class="nav-label">Settings</span><span class="nav-desc">Program setup</span></span>
+      </button>
+    </nav>
+    <div class="sidebar-footer" id="sidebarFooter">
+      <p class="sf-loc">—</p>
+      <p class="sf-meta">—</p>
+    </div>
+  </aside>
+
+  <main class="main-panel">
+    <header class="panel-header">
+      <div>
+        <h1 id="panelTitle">Meal Plan</h1>
+        <p id="panelSubtitle">Review and approve this week's tray</p>
+      </div>
+      <div class="panel-header-actions" id="panelHeaderActions"></div>
+    </header>
+
+    <div class="panel-body">
+
+      <!-- ============ TAB: PLAN ============ -->
+      <section class="tab-panel active" id="tab-plan">
+
+        <!-- ============ SCREEN 3 : WEEKLY TRAY ============ -->
+        <section class="screen active" id="screen-3">
+          <div class="tray-header">
+            <div>
+              <h2>This Week's Meal Plan</h2>
+              <p style="color:var(--ink-soft); font-size:14px; margin-top:4px;" id="traySubline">Bandung, West Java · 120 people · 5 days</p>
+            </div>
+            <div class="week-nav">
+              <button aria-label="Previous week">‹</button>
+              <span>Week 1 of 1</span>
+              <button aria-label="Next week">›</button>
+            </div>
+          </div>
+
+          <div class="metrics-bar">
+            <div class="metric">
+              <div class="label">Total Cost This Week</div>
+              <div class="value" id="metricTotalCost">Rp 3.42M</div>
+              <div class="sub" id="metricBudgetSub">of Rp 3.5M budget</div>
+            </div>
+            <div class="metric">
+              <div class="label">Average / Portion</div>
+              <div class="value" id="metricAvgPortion">Rp 9,500</div>
+              <div class="sub">120 people / day</div>
+            </div>
+            <div class="metric">
+              <div class="label">Nutrition Status</div>
+              <div class="value good"><span class="badge ok" id="metricNutritionBadge">✓ Meets MBG Standard</span></div>
+              <div class="sub" id="metricNutritionSub">3 of 3 days met</div>
+            </div>
+          </div>
+
+          <div class="tray-row" id="trayRow">
+            <!-- day cells injected by JS -->
+          </div>
+
+          <div class="reject-panel" id="rejectPanel">
+            <p>Why doesn't this menu work?</p>
+            <div class="reason-chips" id="reasonChips">
+              <button data-reason="Too expensive">💰 Too expensive</button>
+              <button data-reason="Not common in this area">🗺️ Not common in this area</button>
+              <button data-reason="Nutrition doesn't fit">🥦 Nutrition doesn't fit</button>
+              <button data-reason="Kids won't like it">🙁 Kids won't like it</button>
+              <button data-reason="Other">✏️ Other</button>
+            </div>
+          </div>
+
+          <div class="feedback-strip">
+            <span class="msg">How does this meal plan look overall?</span>
+            <div class="stars" id="weekStars" aria-label="Give a rating">★★★★★</div>
+          </div>
+        </section>
+
+        <!-- ============ SCREEN 4 : DAY DETAIL ============ -->
+        <section class="screen" id="screen-4">
+          <button class="back-link" id="backToTray">← Back to Weekly Menu</button>
+
+          <div class="detail-header">
+            <div>
+              <h2 id="detailDayName">Monday</h2>
+              <p class="servings">Ingredients scaled for <b>120</b> portions</p>
+            </div>
+            <div class="detail-cost-badge">
+              <div class="label">Total Cost Today</div>
+              <div class="amt" id="detailCost">Rp 1,140,000</div>
+            </div>
+          </div>
+
+          <div class="why-panel" id="whyPanel">
+            <div class="why-panel-head">
+              <h3>Why this tray</h3>
+              <div class="why-metrics">
+                <span class="why-metric"><b id="whyAdequacy">88%</b> nutrient adequacy</span>
+                <span class="why-metric"><b id="whyBudgetDelta">−Rp 40,000</b> vs. budget</span>
+              </div>
+            </div>
+            <ul class="why-list" id="whyList">
+              <li>Tagged to West Java in the recipe corpus</li>
+              <li>Meets 88% of the daily protein target for this age group</li>
+              <li>Within 3% of the per-portion budget</li>
+            </ul>
+          </div>
+
+          <div class="dish-block">
+            <div class="dish-block-head">
+              <h3 id="mainDishName">Sweet Soy-Glazed Grilled Chicken</h3>
+              <span class="dish-badge main">Main Dish</span>
+            </div>
+            <div class="dish-hero main-hero" id="mainDishHero"></div>
+            <div class="dish-grid">
+              <div>
+                <ul class="ingredient-list" id="mainIngredientList"></ul>
+              </div>
+              <div class="nutrition-panel" id="mainNutritionPanel"></div>
+              <div>
+                <h4 style="font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); margin:0 0 12px;">How to Prepare</h4>
+                <ol class="steps-list" id="mainStepsList"></ol>
+              </div>
+            </div>
+          </div>
+
+          <div class="dish-block">
+            <div class="dish-block-head">
+              <h3 id="sideDishName">Stir-Fried Water Spinach & Tofu</h3>
+              <span class="dish-badge side">Side Dish</span>
+            </div>
+            <div class="dish-hero side-hero" id="sideDishHero"></div>
+            <div class="dish-grid">
+              <div>
+                <ul class="ingredient-list" id="sideIngredientList"></ul>
+              </div>
+              <div class="nutrition-panel" id="sideNutritionPanel"></div>
+              <div>
+                <h4 style="font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); margin:0 0 12px;">How to Prepare</h4>
+                <ol class="steps-list" id="sideStepsList"></ol>
+              </div>
+            </div>
+          </div>
+
+          <div class="export-row">
+            <button class="btn-secondary" id="detailBackBtn">← Back to Weekly Menu</button>
+          </div>
+        </section>
+
+      </section>
+
+      <!-- ============ TAB: PROCUREMENT ============ -->
+      <section class="tab-panel" id="tab-procurement">
+        <div class="proc-controls">
+          <div class="field-inline">
+            <label for="procWeekSelect">Week</label>
+            <select id="procWeekSelect" class="select-input"></select>
+          </div>
+          <div class="field-inline">
+            <label for="procDaySelect">Day</label>
+            <select id="procDaySelect" class="select-input"></select>
+          </div>
+        </div>
+
+        <div class="subtab-row">
+          <button class="subtab active" data-subtab="week">Weekly recap</button>
+          <button class="subtab" data-subtab="day">Daily recap</button>
+        </div>
+
+        <div class="subtab-panel active" id="proc-week">
+          <div class="data-card">
+            <div class="data-card-head">
+              <div>
+                <h3 id="procWeekTitle">Ingredient needs — Week 1 · 5 days × 120 portions</h3>
+                <p class="data-card-sub" id="procWeekSub">— ingredients · estimated total —</p>
+              </div>
+              <button class="btn-secondary" id="procWeekCsv">⬇ Download CSV</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="procWeekTable"></table>
+            </div>
+          </div>
+        </div>
+
+        <div class="subtab-panel" id="proc-day">
+          <div class="data-card">
+            <div class="data-card-head">
+              <div>
+                <h3 id="procDayTitle">Ingredient needs — Monday</h3>
+                <p class="data-card-sub" id="procDaySub">— ingredients · estimated total —</p>
+              </div>
+              <button class="btn-secondary" id="procDayCsv">⬇ Download CSV</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="procDayTable"></table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ TAB: INVENTORY & AUDIT ============ -->
+      <section class="tab-panel" id="tab-inventory">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <p class="stat-label">Budget ceiling</p>
+            <p class="stat-value" id="invBudget">Rp 0</p>
+            <p class="stat-hint">Per program parameters</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">Planned ingredient cost</p>
+            <p class="stat-value" id="invPlanned">Rp 0</p>
+            <p class="stat-hint">From the generated menu</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">Recorded actuals</p>
+            <p class="stat-value" id="invActual">Rp 0</p>
+            <p class="stat-hint" id="invActualPct">0% of plan</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">Variance (actual − plan)</p>
+            <p class="stat-value" id="invVariance">Rp 0</p>
+            <p class="stat-hint" id="invVarianceHint">—</p>
+          </div>
+        </div>
+
+        <div class="inv-charts-row">
+          <div class="data-card">
+            <h3>Daily budget vs. actual</h3>
+            <p class="data-card-sub">Bars at zero mean that day hasn't been recorded yet.</p>
+            <div id="invChart" class="bar-chart"></div>
+          </div>
+          <div class="data-card">
+            <div class="compliance-head">
+              <span>🛡️</span>
+              <h3>Program nutrition compliance</h3>
+            </div>
+            <p class="data-card-sub" id="invComplianceSub">— of — days meet all AKG criteria.</p>
+            <div class="progress-track"><div class="progress-fill" id="invComplianceBar"></div></div>
+            <p class="mini-heading">Average nutrition, selected day</p>
+            <div id="invNutritionMini"></div>
+          </div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-head">
+            <div>
+              <h3>Stock &amp; cost records</h3>
+              <p class="data-card-sub">Enter received, used, and actual cost. Remaining is calculated automatically for audit.</p>
+            </div>
+            <div class="field-inline">
+              <select id="invDaySelect" class="select-input"></select>
+              <button class="btn-secondary" id="invExportBtn">⬇ Export audit CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="invTable"></table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ TAB: SETTINGS ============ -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="data-card">
+          <h3>Program parameters</h3>
+          <p class="data-card-sub">These values were set during onboarding. Changing them will regenerate the plan.</p>
+          <div class="settings-grid">
+            <div class="settings-field">
+              <label>Location</label>
+              <input type="text" id="setLocation" class="select-input">
+            </div>
+            <div class="settings-field">
+              <label>Number of people</label>
+              <input type="number" id="setPeople" class="select-input">
+            </div>
+            <div class="settings-field">
+              <label>Weekly budget (Rp)</label>
+              <input type="text" id="setBudget" class="select-input">
+            </div>
+            <div class="settings-field">
+              <label>Menu duration</label>
+              <input type="text" id="setDuration" class="select-input" readonly>
+            </div>
+          </div>
+          <button class="cta-primary" id="settingsRegenerate" style="max-width:260px; margin-top:20px;">↻ Regenerate Plan</button>
+        </div>
+
+        <div class="data-card">
+          <h3>Feedback preferences learned so far</h3>
+          <p class="data-card-sub">Reasons you've given when rejecting a day's menu, used to steer future generations.</p>
+          <div id="settingsFeedbackList" class="feedback-log">
+            <p class="empty-note">No rejections recorded yet in this session.</p>
+          </div>
+        </div>
+
+        <div class="data-card">
+          <h3>Export &amp; sharing</h3>
+          <p class="data-card-sub">Save or share the current plan for your kitchen and reporting needs.</p>
+          <div class="export-options">
+            <button class="export-option" data-type="pdf">
+              <div class="ic">📄</div>
+              <div class="t">Export to PDF</div>
+              <div class="d">Includes recipes &amp; ingredients, ready to print</div>
+            </button>
+            <button class="export-option" data-type="image">
+              <div class="ic">🖼️</div>
+              <div class="t">Save as Image</div>
+              <div class="d">Great for sharing over WhatsApp</div>
+            </button>
+            <button class="export-option" data-type="csv">
+              <div class="ic">📊</div>
+              <div class="t">Export to Excel/CSV</div>
+              <div class="d">For financial audits &amp; cost reporting</div>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+
+<div class="toast" id="toast"></div>
+
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
