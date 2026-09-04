@@ -491,6 +491,100 @@ def candidates(body: PlanBody) -> dict:
     return _optimizer().explain_candidates(body.to_request(extra_dishes=extra))
 
 
+class SwapBody(PlanBody):
+    day_index: int = 0
+    slot: str
+    # The day's current lineup, {slot: dish_id or null} — everything except
+    # `slot` stays exactly as-is; only the named slot gets replaced. Sent by
+    # the client because this endpoint recomputes the whole day (cost,
+    # nutrients, compliance) rather than touching just the swapped tile.
+    day_slots: dict[str, Optional[int]] = {}
+
+
+@app.post("/api/swap")
+def swap_dish(body: SwapBody) -> dict:
+    """Replace one dish in one already-built day, holding every other slot
+    fixed — the "give me something else for this slot" gesture an operator
+    review needs, distinct from both a full reshuffle (redecides everything)
+    and ingredient substitution (which is about availability, not a dish
+    the operator would simply rather not serve).
+
+    Doesn't re-run the solver: the replacement is the next-best dish this
+    slot's own candidate pool already ranked (the same pool a real solve
+    draws from — same gates, same score), skipping whatever's already
+    somewhere in this day. A full re-optimisation would rebalance every
+    other slot's cost/nutrition too, which defeats the point of a scoped
+    swap — the operator asked to change one dish, not the whole day.
+    """
+    if body.slot not in SLOTS:
+        raise HTTPException(400, f"unknown slot '{body.slot}'")
+
+    weights = _history().recency_weights(body.province, body.stage)
+    extra = _custom_dishes().list_dishes(body.province, body.stage)
+    request = body.to_request(recency_weights=weights, extra_dishes=extra)
+    targets = stage_band(request.stage).per_meal(request.config.akg_fraction)
+    if request.target_overrides:
+        targets = {**targets, **{k: v for k, v in request.target_overrides.items()
+                                 if k in targets and v is not None}}
+
+    pool = _optimizer()._candidates(request, targets).get(body.slot, [])
+    taken = {v for v in body.day_slots.values() if v is not None}
+    replacement = next((d for d in pool if d.dish_id not in taken), None)
+    if replacement is None:
+        raise HTTPException(
+            422, "No alternative dish is available for this slot under the "
+            "current budget and exclusion constraints.")
+
+    store = _store()
+    dishes = {}
+    for slot in SLOTS:
+        if slot == body.slot:
+            dishes[slot] = replacement
+            continue
+        dish_id = body.day_slots.get(slot)
+        if dish_id is None:
+            dishes[slot] = None
+        elif dish_id < 0:
+            dishes[slot] = _custom_dishes().get(body.province, body.stage, dish_id)
+        else:
+            dishes[slot] = store.dish(dish_id)
+
+    from .tkpi import NUTRIENT_KEYS
+    nutrients = {k: 0.0 for k in NUTRIENT_KEYS}
+    cost = 0.0
+    for dish_ in dishes.values():
+        if dish_ is None:
+            continue
+        cost += dish_.cost_per_portion_idr
+        for k in NUTRIENT_KEYS:
+            nutrients[k] += dish_.per_portion.get(k, 0.0)
+    binding_scores = [min(1.0, nutrients.get(n, 0.0) / targets[n])
+                      for n in BINDING_NUTRIENTS if targets.get(n)]
+    adequacy = sum(binding_scores) / len(binding_scores) if binding_scores else 0.0
+
+    lang = norm_lang(body.lang)
+    slots_payload = {}
+    for slot, dish_ in dishes.items():
+        slots_payload[slot] = None if dish_ is None else {
+            **dish_.to_dict(),
+            "main_food": dish_.main_food_name,
+            "main_food_code": dish_.main_food_code,
+            "cost_total_idr": round(dish_.cost_per_portion_idr * body.portions),
+            "steps": [s.strip() for s in (dish_.steps or "").split(".")
+                      if s.strip()][:8],
+        }
+
+    return {
+        "index": body.day_index,
+        "cost_per_portion_idr": round(cost),
+        "cost_total_idr": round(cost * body.portions),
+        "adequacy": round(adequacy, 3),
+        "nutrients": {k: round(v, 2) for k, v in nutrients.items()},
+        "compliance": _compliance(nutrients, targets, lang),
+        "slots": slots_payload,
+    }
+
+
 class TranslateBody(BaseModel):
     names: list[str] = Field(..., min_length=1, max_length=200)
     use_model: bool = True

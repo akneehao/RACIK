@@ -627,3 +627,54 @@ def test_solve_fetches_this_scopes_saved_recipes_as_extra_dishes():
             assert mocked.call_count == 1, (
                 f"{path} did not fetch this scope's saved recipes as "
                 "extra_dishes")
+
+
+# ---------------------------------------------------------------- swap
+
+def test_swap_replaces_only_the_named_slot():
+    client = _recipe_client()
+    plan = client.post("/api/plan", json={
+        "days": 1, "stage": "sd", "portions": 50,
+        "province": "Jawa Tengah", "max_solve_seconds": 8}).json()
+    day = plan["days"][0]
+    day_slots = {slot: (d["dish_id"] if d else None)
+                for slot, d in day["slots"].items()}
+    target_slot = next(s for s, d in day["slots"].items() if d is not None)
+    original_id = day_slots[target_slot]
+
+    res = client.post("/api/swap", json={
+        "days": 1, "stage": "sd", "portions": 50, "province": "Jawa Tengah",
+        "max_solve_seconds": 8, "day_index": 0, "slot": target_slot,
+        "day_slots": day_slots})
+    assert res.status_code == 200, res.text
+    swapped = res.json()
+
+    assert swapped["slots"][target_slot]["dish_id"] != original_id
+    for slot, dish_id in day_slots.items():
+        if slot == target_slot:
+            continue
+        got = swapped["slots"][slot]
+        assert (got["dish_id"] if got else None) == dish_id, (
+            f"slot {slot} changed but only {target_slot} should have")
+    # a real recompute, not an echo of the original day
+    assert swapped["cost_per_portion_idr"] > 0
+    assert swapped["compliance"]
+
+
+def test_swap_rejects_an_unknown_slot():
+    client = _recipe_client()
+    res = client.post("/api/swap", json={
+        "stage": "sd", "day_index": 0, "slot": "dessert", "day_slots": {}})
+    assert res.status_code == 400
+
+
+def test_swap_reports_no_alternative_rather_than_crashing():
+    from unittest.mock import patch
+    from racik.optimizer import MenuOptimizer
+    client = _recipe_client()
+    with patch.object(MenuOptimizer, "_candidates",
+                      return_value={"hewani": []}):
+        res = client.post("/api/swap", json={
+            "stage": "sd", "day_index": 0, "slot": "hewani",
+            "day_slots": {"hewani": 12345}})
+    assert res.status_code == 422

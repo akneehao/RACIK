@@ -493,6 +493,8 @@ const STRINGS = {
     "rate.label": "Nilai:",
     "rate.saved": "Tersimpan · rata-rata {avg}★",
     "rate.failed": "Gagal menyimpan",
+    "swap.btn": "⇄ Ganti hidangan ini",
+    "swap.failed": "Gagal mengganti: {error}",
     "review.title": "Bagaimana menu hari ini?",
     "review.prompt": "Tandai apakah menu ini siap dimasak, atau tolak dan beri tahu alasannya.",
     "review.accept": "Terima",
@@ -675,6 +677,8 @@ const STRINGS = {
     "rate.label": "Rate:",
     "rate.saved": "Saved · avg {avg}★",
     "rate.failed": "Failed to save",
+    "swap.btn": "⇄ Swap this dish",
+    "swap.failed": "Failed to swap: {error}",
     "review.title": "How does today's menu look?",
     "review.prompt": "Mark this menu ready to cook, or reject it and say why.",
     "review.accept": "Accept",
@@ -1305,6 +1309,8 @@ function renderDay(day){
           style="cursor:pointer;font-size:15px;line-height:1;color:var(--line)">★</span>`).join("")}
         <span class="rate-result mono" style="font-size:10.5px;color:var(--ink-soft);margin-left:6px"></span>
       </div>
+      <button type="button" class="btn ghost slot-swap" data-slot="${slot}"
+        style="font-size:11.5px;padding:6px 10px;width:100%">${esc(t("swap.btn"))}</button>
     </div>`;
   }).join("");
   el("tray").querySelectorAll(".slot-main[data-id]").forEach(b =>
@@ -1314,6 +1320,8 @@ function renderDay(day){
     row.querySelectorAll(".rate-star").forEach(star =>
       star.onclick = () => rateDish(dishId, +star.dataset.n, row));
   });
+  el("tray").querySelectorAll(".slot-swap").forEach(btn =>
+    btn.onclick = () => swapDish(day.index, btn.dataset.slot, btn));
 
   el("complianceSub").textContent = t("compliance.sub",
     {day: dayLabel(day), stage: bandLabel()});
@@ -1448,6 +1456,50 @@ async function rateDish(dishId, n, row){
     result.textContent = t("rate.saved", {avg: d.mean_rating});
   }catch(err){
     result.textContent = t("rate.failed");
+  }
+}
+
+/** "Give me something else for this slot" — distinct from ingredient
+ * substitution (availability, not preference) and from a full reshuffle
+ * (redecides everything). /api/swap holds every other slot fixed and
+ * recomputes just this one day's cost/nutrients/compliance around the
+ * replacement, so PLAN.summary's plan-wide means and the relaxation table
+ * are patched here too — otherwise the top metrics and the "batas
+ * dilonggarkan" notes would keep showing pre-swap numbers for a day that
+ * just changed underneath them. */
+async function swapDish(dayIndex, slot, btn){
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="border-top-color:var(--ink);border-color:rgba(31,43,34,.25)"></span>`;
+  try{
+    const day = PLAN.days[dayIndex];
+    const day_slots = {};
+    for(const [s, d] of Object.entries(day.slots)) day_slots[s] = d ? d.dish_id : null;
+    const res = await fetch(API + "/api/swap", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...LAST_BODY, day_index: dayIndex, slot, day_slots})
+    });
+    if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const updated = await res.json();
+    PLAN.days[dayIndex] = {...day, ...updated};
+
+    PLAN.summary.mean_cost_per_portion_idr =
+      PLAN.days.reduce((s, d) => s + d.cost_per_portion_idr, 0) / PLAN.days.length;
+    PLAN.summary.mean_adequacy =
+      PLAN.days.reduce((s, d) => s + d.adequacy, 0) / PLAN.days.length;
+    const freshShortfalls = updated.compliance
+      .filter(r => r.binding && r.pct < 100)
+      .map(r => ({day: dayIndex, label_id: r.label_id, label_en: r.label_en,
+        unit: r.unit, shortfall: Math.max(0, r.target - r.value),
+        target: r.target, share: Math.max(0, (100 - r.pct) / 100)}));
+    PLAN.relaxations = PLAN.relaxations.filter(r => r.day !== dayIndex)
+      .concat(freshShortfalls).sort((a, b) => b.share - a.share);
+    PLAN.summary.relaxed_floors = PLAN.relaxations.length;
+
+    renderPlan();
+  }catch(err){
+    alert(t("swap.failed", {error: err.message}));
+    btn.disabled = false; btn.textContent = original;
   }
 }
 
