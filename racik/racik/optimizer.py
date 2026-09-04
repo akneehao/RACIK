@@ -18,6 +18,7 @@ slightly short on fibre, and the report says so either way.
 from __future__ import annotations
 
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
@@ -477,7 +478,11 @@ class MenuOptimizer:
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = request.max_solve_seconds
-        solver.parameters.num_search_workers = 8
+        # Match worker threads to what the host actually has — on a
+        # CPU-constrained container (e.g. Render's free/starter tier),
+        # spawning more search workers than cores adds scheduling overhead
+        # and slows the solve down rather than speeding it up.
+        solver.parameters.num_search_workers = max(1, min(8, os.cpu_count() or 1))
         solver.parameters.random_seed = request.random_seed
         status = solver.Solve(model)
 

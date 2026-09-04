@@ -700,7 +700,7 @@ class RacikOrchestrator:
             exclude_terms=resolved["exclude_terms"],
             exclude_dish_ids=list(exclude_ids),
             enforce_micronutrients=resolved["enforce_micronutrients"],
-            max_solve_seconds=12.0,
+            max_solve_seconds=25.0,
         )
         result = self.optimizer.solve(request)
         cp_sat_note = ""
@@ -719,7 +719,7 @@ class RacikOrchestrator:
                 exclude_terms=resolved["exclude_terms"],
                 exclude_dish_ids=list(narrower_ids),
                 enforce_micronutrients=resolved["enforce_micronutrients"],
-                max_solve_seconds=12.0,
+                max_solve_seconds=25.0,
             )
             retried = self.optimizer.solve(retry_request)
             if retried.feasible:
@@ -743,7 +743,7 @@ class RacikOrchestrator:
                 exclude_terms=[],
                 exclude_dish_ids=list(exclude_ids),
                 enforce_micronutrients=resolved["enforce_micronutrients"],
-                max_solve_seconds=12.0,
+                max_solve_seconds=25.0,
             )
             retried = self.optimizer.solve(retry_request)
             if retried.feasible:
