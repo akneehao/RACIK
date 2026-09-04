@@ -44,14 +44,21 @@ class MBGConfig:
 
     budget_per_portion_idr
         Rp10,000 is the standing national figure for 2025-2026 (cut from an
-        original Rp15,000 target by Presidential decision, 29 Nov 2024). It
-        covers ingredients + preparation + distribution.
+        original Rp15,000 target by Presidential decision, 29 Nov 2024). At
+        the national/BGN level this figure covers ingredients + preparation +
+        distribution combined — but the budget Racik's own operator enters at
+        onboarding is scoped narrower: it's specifically the food/ingredient
+        budget for the plan, not an all-inclusive program pagu with labour
+        and logistics baked in. Racik has no visibility into a kitchen's
+        separate operational costs, so it can't meaningfully split them out.
     ingredient_budget_share
-        BGN's per-SPPG allocation splits ~70% raw ingredients / 20% operational
-        / 10% incentives (Dadan Hindayana, Feb 2026) -> ~Rp7,000 of the Rp10,000
-        is realistically available for raw ingredients. This is a per-kitchen
-        allocation, NOT a legislated per-portion line item; treat as a planning
-        assumption, editable per region.
+        1.0: the operator's input is already the ingredient budget, so all of
+        it is available for raw ingredients by default. BGN's own per-SPPG
+        guidance separately splits ~70% ingredients / 20% operational / 10%
+        incentives out of the *national* pagu (Dadan Hindayana, Feb 2026) —
+        real context for why that split exists elsewhere, but not a reason to
+        reserve part of Racik's own operator-entered budget unless the notes
+        say so explicitly (see agents.py's Agen Biaya).
     akg_fraction
         One MBG meal is designed to cover ~1/3 of daily AKG (BGN Deputy Head
         Nanik Sudaryati Deyang, Mar 2026).
@@ -60,7 +67,7 @@ class MBGConfig:
     """
 
     budget_per_portion_idr: float = 10_000.0
-    ingredient_budget_share: float = 0.70
+    ingredient_budget_share: float = 1.0
     akg_fraction: float = 1.0 / 3.0
     fat_energy_ceiling: float = 0.30
     # Regional cost index: ingredient budget is "at cost tergantung indeks

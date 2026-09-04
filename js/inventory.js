@@ -7,8 +7,8 @@
 
 import { state, estimateTotalBudget } from './state.js';
 import { api } from './api.js';
-import { MEETS_AKG_THRESHOLD } from './plan.js';
-import { formatIDR, downloadCsv } from './utils.js';
+import { MEETS_AKG_THRESHOLD, glossNames } from './plan.js';
+import { formatIDR, downloadCsv, glossFor } from './utils.js';
 
 // run_id -> stock records for that run (all days), fetched once and reused;
 // invalidated (re-fetched) whenever this tab is (re)rendered after a save.
@@ -99,6 +99,7 @@ async function renderStockTable(day) {
   if (!day || !day.procurement) { tableEl.innerHTML = ''; return; }
   const records = await loadRecordsForRun(day.runId);
   const lines = day.procurement.lines;
+  await glossNames(lines.map((l) => l.name));
 
   const rowsHtml = lines.map((line) => {
     const rec = recordFor(records, day.dayIndex, line.name) || {
@@ -109,7 +110,7 @@ async function renderStockTable(day) {
     const varianceClass = varianceIdr > 0 ? 'bad' : 'good';
     return `
       <tr data-name="${line.name}">
-        <td>${line.name}</td>
+        <td>${glossFor(line.name)}</td>
         <td class="num">${line.gross_kg.toFixed(2)} kg</td>
         <td class="num">${formatIDR(line.cost_idr)}</td>
         <td class="num"><input type="number" class="inv-received" min="0" max="200" value="${rec.received_pct}"> %</td>
@@ -204,7 +205,7 @@ export async function exportAuditCsv() {
         received_pct: 100, used_pct: 100, actual_cost_idr: line.cost_idr, note: '',
       };
       const actual = rec.actual_cost_idr != null ? rec.actual_cost_idr : line.cost_idr;
-      rows.push(`"${d.name}","${line.name}",${Math.round(line.cost_idr)},${Math.round(actual)},` +
+      rows.push(`"${d.name}","${glossFor(line.name)}",${Math.round(line.cost_idr)},${Math.round(actual)},` +
         `${rec.received_pct},${rec.used_pct},"${rec.note || ''}"`);
     }
   }

@@ -1,12 +1,20 @@
   :root{
+    /* --paper, --leaf, --leaf-dark and --gold-soft are the exact colors
+       sampled from the RACIK brand mark (assets/logo-*.png) — not a
+       hand-picked approximation, the literal pixels of the logo itself.
+       --ink stays a separate, darker near-black: it carries body text and
+       needs stronger contrast than the logo's own softer ink tone would
+       give it. --leaf-bright, --gold, --chili are UI-only accents (bar
+       charts, CTAs, alerts) with no equivalent flat color in the mark. */
     --paper:#F7F3E8;
     --paper-dim:#EFE9D8;
     --ink:#1F2B22;
     --ink-soft:#4A5A4C;
-    --leaf:#3F6B4F;
-    --leaf-dark:#2C4C38;
+    --leaf:#30503B;
+    --leaf-dark:#22392A;
+    --leaf-bright:#43A047;
     --gold:#E8A33D;
-    --gold-soft:#F3D9A8;
+    --gold-soft:#EDCF9A;
     --chili:#C0392B;
     --chili-soft:#F6DCD8;
     --card:#FFFFFF;
@@ -66,14 +74,11 @@
   .brand{
     display:flex; align-items:center; gap:10px;
   }
-  .brand-mark{
-    width:34px; height:34px; border-radius:9px;
-    background: linear-gradient(155deg, var(--leaf), var(--leaf-dark));
-    display:flex; align-items:center; justify-content:center;
-    color:var(--gold-soft); font-family:'Fraunces',serif; font-weight:700; font-size:17px;
-    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.15);
-  }
-  .brand-name{ font-family:'Fraunces', serif; font-weight:700; font-size:21px; letter-spacing:-0.01em; }
+  /* flex-shrink:0 matters here: as a flex item of .brand/.sidebar-brand,
+     the image would otherwise get compressed narrower than its natural
+     width by the flex algorithm on tight viewports while height:Npx stayed
+     fixed — squashing the logo horizontally instead of scaling it. */
+  .brand-logo-img{ height:40px; width:auto; display:block; flex-shrink:0; object-fit:contain; }
   .lang-toggle{
     display:flex; gap:2px; background:var(--paper-dim); border-radius:100px; padding:3px;
     font-size:13px; font-weight:600;
@@ -122,7 +127,7 @@
   @media (max-width: 860px){
     .landing{ grid-template-columns: 1fr; gap:36px; padding-top:12px; }
     .landing-visual{ order:-1; height:220px; }
-    .tray-hero{ width:220px; height:220px; }
+    .hero-food-img{ max-width:220px; }
   }
   .landing h1{ font-size: 52px; line-height:1.03; }
   @media (max-width: 520px){
@@ -147,7 +152,9 @@
     .loc-field input{ width:100%; padding:8px 0; }
     .loc-field button{ width:100%; justify-content:center; }
   }
-  .loc-field .pin{ font-size:18px; }
+  .loc-field:has(.input-error){ border-color: var(--chili); }
+  input.input-error{ border-color: var(--chili); }
+  .loc-field .pin{ display:flex; flex-shrink:0; }
   .loc-field input{
     border:none; outline:none; flex:1; font-size:16px; font-family:inherit;
     padding:12px 0; background:transparent; color:var(--ink);
@@ -161,7 +168,8 @@
   .suggestions{
     position:absolute; top:calc(100% + 6px); left:0; right:0;
     background:var(--card); border:1px solid var(--line); border-radius:10px;
-    box-shadow: var(--shadow); overflow:hidden; z-index:5; display:none;
+    box-shadow: var(--shadow); overflow-y:auto; overflow-x:hidden; max-height:280px;
+    z-index:5; display:none;
   }
   .suggestions.show{ display:block; }
   .suggestions button{
@@ -179,18 +187,9 @@
     position:relative; height: 360px;
     display:flex; align-items:center; justify-content:center;
   }
-  .tray-hero{
-    width: 320px; height:320px; position:relative;
+  .hero-food-img{
+    width:100%; max-width:360px; height:auto; display:block;
   }
-  .tray-hero .plate{
-    position:absolute; border-radius:16px; background:var(--card); border:1.5px solid var(--line);
-    box-shadow: var(--shadow);
-    display:flex; align-items:center; justify-content:center; padding:18px;
-  }
-  .tray-hero .plate svg{ width:100%; height:100%; filter: drop-shadow(0 4px 8px rgba(31,43,34,0.1)); }
-  .tray-hero .p1{ width:150px; height:150px; top:0; left:10px; transform:rotate(-6deg); }
-  .tray-hero .p2{ width:130px; height:130px; top:30px; right:0; transform:rotate(8deg); }
-  .tray-hero .p3{ width:170px; height:170px; bottom:0; left:60px; transform:rotate(3deg); }
 
   /* ---------- Screen 2 : Parameters ---------- */
   .params-wrap{ display:grid; grid-template-columns: 1fr 340px; gap:40px; padding-top:8px; }
@@ -291,6 +290,7 @@
   .tray-header h2{ font-size:28px; }
   .week-nav{ display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--ink-soft); }
   .week-nav button{ border:1.5px solid var(--line); background:var(--card); border-radius:8px; width:32px; height:32px; cursor:pointer; }
+  .week-nav button:disabled{ opacity:0.35; cursor:default; }
 
   .metrics-bar{
     display:flex; gap:0; background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
@@ -354,6 +354,10 @@
   .slot-row-bottom{ display:contents; }
   .slot .slot-eyebrow{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .slot .slot-name{ font-family:'Fraunces',serif; font-weight:700; font-size:14px; line-height:1.25; margin-top:4px; color:var(--ink); }
+  .slot .slot-name-id{
+    display:block; font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:11px;
+    line-height:1.3; margin-top:1px; color:var(--ink-soft);
+  }
   .slot .slot-foot{ display:flex; align-items:center; justify-content:space-between; margin-top:8px; gap:4px; flex-wrap:wrap; }
   .slot .slot-tag{
     font-size:10px; font-weight:600; padding:2px 8px; border-radius:100px; background:#DCEBDF; color:var(--leaf-dark);
@@ -369,28 +373,6 @@
     .slot.slot-main{ grid-column: span 2; }
   }
 
-  .dish-hero{
-    width:100%; aspect-ratio: 21/9; border-radius:12px; overflow:hidden;
-    display:flex; align-items:center; justify-content:center; margin-bottom:16px;
-    position:relative;
-  }
-  .dish-hero svg{ width:30%; height:auto; max-width:220px; filter: drop-shadow(0 8px 14px rgba(31,43,34,0.12)); }
-  .dish-hero.main-hero{ background: linear-gradient(155deg, var(--gold-soft), #F1E0B8); }
-  .dish-hero.side-hero{ background: linear-gradient(155deg, #DCEBDF, #C9E0CE); }
-  .dish-hero::before{
-    content:''; position:absolute; inset:0;
-    background-image: radial-gradient(circle, rgba(31,43,34,0.05) 1px, transparent 1px);
-    background-size: 16px 16px;
-    opacity:0.5;
-  }
-  .hero-plate{
-    position:relative; z-index:1;
-    width:150px; height:150px; border-radius:50%;
-    background: rgba(255,255,255,0.55);
-    display:flex; align-items:center; justify-content:center;
-    box-shadow: 0 10px 24px -10px rgba(31,43,34,0.2), inset 0 0 0 6px rgba(255,255,255,0.4);
-  }
-  .hero-plate svg{ width:70%; height:auto; max-width:none; }
 
   .day-foot{
     display:flex; justify-content:space-between; align-items:center; padding:0 16px 14px; font-size:13px;
@@ -410,17 +392,23 @@
   .hover-preview strong{ color:var(--gold-soft); display:block; margin-bottom:6px; font-size:12px; text-transform:uppercase; letter-spacing:.03em;}
   .hover-preview .nutri-row{ display:flex; justify-content:space-between; opacity:0.85; }
 
+  /* Lives inside a .day-cell, right under its ✓/✕ buttons — not one shared
+     panel at the bottom of the whole tray, which meant scrolling past every
+     other card to reach it. */
   .reject-panel{
-    margin-top:14px; padding:16px; background:var(--chili-soft); border-radius:12px; display:none;
+    margin:0 16px 14px; padding:12px 14px; background:var(--chili-soft); border-radius:12px; display:none;
   }
   .reject-panel.show{ display:block; animation: fadeIn .2s ease; }
-  .reject-panel p{ font-size:13px; font-weight:700; color:var(--chili); margin:0 0 10px; }
+  .reject-panel p{ font-size:12.5px; font-weight:700; color:var(--chili); margin:0 0 8px; }
   .reason-chips{ display:flex; flex-wrap:wrap; gap:8px; }
   .reason-chips button{
-    border:1.5px solid rgba(192,57,43,0.3); background:#fff; padding:7px 12px; border-radius:100px; font-size:12.5px;
+    border:1.5px solid rgba(192,57,43,0.3); background:#fff; padding:6px 11px; border-radius:100px; font-size:11.5px;
     cursor:pointer; color:var(--chili);
   }
   .reason-chips button.picked{ background:var(--chili); color:#fff; }
+  /* Neutral, not chili-red — this isn't a complaint, just "try another dish". */
+  .reason-chips button.regen-plain{ border-color:var(--line); color:var(--ink-soft); }
+  .reason-chips button.regen-plain.picked{ background:var(--ink-soft); border-color:var(--ink-soft); color:#fff; }
 
   .feedback-strip{
     display:flex; align-items:center; justify-content:space-between; margin-top:30px;
@@ -460,7 +448,8 @@
 
   .dish-block{ margin-bottom:28px; }
   .dish-block-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-  .dish-block-head h3{ font-size:19px; }
+  .dish-block-head h3{ font-size:19px; margin:0; }
+  .dish-name-id{ margin:2px 0 0; font-size:12.5px; color:var(--ink-soft); }
   .dish-block-head .dish-badge{ font-size:11px; padding:4px 10px; border-radius:100px; font-weight:700; letter-spacing:0.02em; }
   .dish-badge.main{ background:var(--gold-soft); color:#7A5313; }
   .dish-badge.side{ background:#DCEBDF; color:var(--leaf-dark); }
@@ -484,6 +473,7 @@
     display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px dashed var(--line); font-size:14px;
   }
   .ingredient-list li .amt{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); font-size:13px; }
+  .ingredient-list li .ing-name-id{ display:block; font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
 
   .nutrition-panel{ background:var(--paper-dim); border-radius:12px; padding:16px; }
   .nutrition-panel h4{ font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); margin:0 0 12px; }
@@ -515,7 +505,7 @@
     cursor:pointer; text-align:center; box-shadow:var(--shadow);
   }
   .export-option:hover{ border-color:var(--leaf); transform:translateY(-3px); }
-  .export-option .ic{ font-size:30px; margin-bottom:10px; }
+  .export-option .ic{ display:flex; justify-content:center; margin-bottom:10px; }
   .export-option .t{ font-weight:700; font-size:14.5px; margin-bottom:4px; }
   .export-option .d{ font-size:12px; color:var(--ink-soft); }
   .export-option.done{ border-color:var(--leaf); background:#F2F8F3; }
@@ -541,19 +531,20 @@
     display:flex; flex-direction:column; gap:22px; padding:22px 16px;
     position:sticky; top:0; height:100vh;
   }
-  .sidebar-brand{ display:flex; align-items:center; gap:10px; padding:0 6px; }
-  .sidebar-brand .brand-mark{ background: linear-gradient(155deg, var(--gold), #C77A2E); color:var(--ink); }
-  .brand-name-block{ display:flex; flex-direction:column; line-height:1.2; }
-  .brand-name-block .brand-name{ font-family:'Fraunces',serif; font-weight:700; font-size:18px; color:var(--paper); }
-  .brand-name-block .brand-sub{ font-size:11px; color:rgba(247,243,232,0.55); }
+  .sidebar-brand{ display:flex; flex-direction:column; gap:4px; padding:0 6px; }
+  .sidebar-logo-img{ height:34px; width:auto; flex-shrink:0; object-fit:contain; }
   .sidebar-nav{ display:flex; flex-direction:column; gap:4px; }
   .nav-item{
     display:flex; align-items:center; gap:11px; background:none; border:none; color:rgba(247,243,232,0.68);
     padding:10px 12px; border-radius:10px; cursor:pointer; text-align:left; font-family:inherit; width:100%;
   }
+  /* An author display:flex/block rule beats the UA stylesheet's [hidden]
+     default, so anything toggled with the `hidden` attribute needs this to
+     actually disappear — see the Stock & Audit nav item. */
+  [hidden]{ display:none !important; }
   .nav-item:hover{ background: rgba(247,243,232,0.06); color:var(--paper); }
   .nav-item.active{ background: rgba(232,163,61,0.18); color:var(--paper); }
-  .nav-icon{ font-size:16px; width:20px; text-align:center; flex-shrink:0; }
+  .nav-icon{ width:20px; height:20px; flex-shrink:0; display:block; }
   .nav-text{ display:flex; flex-direction:column; line-height:1.3; }
   .nav-label{ font-size:13.5px; font-weight:600; }
   .nav-desc{ font-size:10.5px; color:rgba(247,243,232,0.4); }
@@ -582,7 +573,6 @@
     .app-shell{ flex-direction:column; }
     .sidebar{ width:100%; height:auto; position:static; flex-direction:row; align-items:center; padding:12px 12px; gap:10px; overflow:hidden; }
     .sidebar-brand{ flex-shrink:0; }
-    .sidebar-brand .brand-sub{ display:none; }
     .sidebar-nav{ flex-direction:row; overflow-x:auto; gap:4px; flex:1; min-width:0; -webkit-overflow-scrolling:touch; }
     .nav-item{ flex-direction:column; align-items:center; gap:2px; padding:8px 9px; width:auto; white-space:nowrap; flex-shrink:0; }
     .nav-text{ align-items:center; }
@@ -594,8 +584,7 @@
   }
 
   @media (max-width:520px){
-    .sidebar-brand .brand-name{ font-size:15px; }
-    .brand-mark{ width:28px; height:28px; font-size:14px; }
+    .brand-logo-img{ height:30px; }
   }
 
   /* ---- shared data-view components (Procurement / Inventory / Settings) ---- */

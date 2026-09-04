@@ -6,8 +6,9 @@ data/racik.db
 # records) — see racik/statedb.py. Per-deployment, never a source artefact.
 data/racik_state.db
 
-# SEA-LION translation cache — regenerated on demand, per-deployment
+# SEA-LION translation/rewrite caches — regenerated on demand, per-deployment
 data/dish_translations.json
+data/recipe_steps_en.json
 
 # Local secrets
 .env

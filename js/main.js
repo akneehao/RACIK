@@ -9,10 +9,12 @@
 //   icons.js         generic per-slot SVG illustrations (no per-dish assets)
 //   onboarding.js    Screen 1 (location) + Screen 2 (parameters)
 //   plan.js          Screen 3 (weekly tray) + Screen 4 (day detail); calls
-//                    /api/generate and /api/review
-//   procurement.js   Procurement tab (reads the plan's embedded procurement data)
+//                    /api/generate and /api/review; also the PDF/image
+//                    export card at the bottom of screen 3
+//   procurement.js   Procurement tab (reads the plan's embedded procurement
+//                    data); also the CSV export button
 //   inventory.js     Stock & Audit tab; calls /api/stock
-//   settings.js      Settings tab; calls /api/history and /api/report
+//   settings.js      Settings tab; calls /api/history
 //   shell.js         sidebar shell + tab switching (this file wires it up)
 
 import { initOnboarding } from './onboarding.js';

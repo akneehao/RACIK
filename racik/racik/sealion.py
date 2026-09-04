@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -94,6 +95,16 @@ class SeaLionClient:
         self.min_interval = min_interval
         self.max_retries = max_retries
         self._last_call = 0.0
+        # FastAPI runs sync route handlers in a thread pool, and this client
+        # is a process-wide singleton (api.py's @lru_cache), so two dishes'
+        # steps requests genuinely land in this method from different threads
+        # at once — confirmed live: opening a day detail (main + side dish
+        # fetched concurrently) let both threads read the same stale
+        # `_last_call`, both conclude no wait is needed, and fire together,
+        # tripping the hosted API's real rate limit. One lock around the
+        # whole "wait, then send" sequence makes concurrent callers queue
+        # instead of racing.
+        self._lock = threading.Lock()
         self.calls = 0
 
     @property
@@ -115,11 +126,21 @@ class SeaLionClient:
     # ------------------------------------------------------------ transport
     def chat(self, messages: list[dict], tools: Optional[list[dict]] = None,
              temperature: float = 0.0, max_tokens: int = 1400,
-             tool_choice: str = "auto") -> ChatResult:
+             tool_choice: str = "auto",
+             chat_template_kwargs: Optional[dict] = None) -> ChatResult:
         """One chat-completions round trip.
 
         temperature defaults to 0: the orchestrator's job is to extract
         parameters and relay tool output, and that must be reproducible.
+
+        chat_template_kwargs is a vLLM/SEA-LION-specific extension, not part
+        of the OpenAI schema — pass {"enable_thinking": False} to turn off a
+        reasoning model's "reasoning_content" scratchpad for a task that
+        doesn't need it. Reasoning tokens count against max_tokens, so a
+        model can otherwise spend its entire budget "thinking" and return
+        empty content (see recipe_text.py's StepsTranslator, which hit this
+        on longer recipes). Left unset for other callers/providers, since a
+        non-vLLM backend may reject an unrecognised field.
         """
         if not self.configured:
             raise SeaLionNotConfigured(
@@ -136,6 +157,8 @@ class SeaLionClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
+        if chat_template_kwargs:
+            payload["chat_template_kwargs"] = chat_template_kwargs
 
         body = self._post("/chat/completions", payload)
         try:
@@ -192,10 +215,17 @@ class SeaLionClient:
     def _throttle(self) -> None:
         if self.min_interval <= 0:
             return
-        wait = self.min_interval - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+        # Locked so "check the gap, sleep, stamp _last_call" is one atomic
+        # step — see __init__'s note on why this must be thread-safe. Only
+        # the wait itself is serialized; the lock is released before the
+        # caller actually sends its request, so the network round-trips of
+        # two calls can still overlap once their dispatch times are spaced
+        # out correctly.
+        with self._lock:
+            wait = self.min_interval - (time.monotonic() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
 
 
 def _parse_tool_calls(raw_calls: Iterable[dict]) -> list[ToolCall]:

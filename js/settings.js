@@ -1,25 +1,40 @@
 // settings.js
-// Program parameters recap, the feedback log (real, persisted rejection
-// reasons from /api/history — not just this session's in-memory pushes),
-// and the export options.
+// Program parameters recap and the feedback log (real, persisted rejection
+// reasons from /api/history, not just this session's in-memory pushes).
+// PDF/image export live on the Meal Plan tab now (js/plan.js); CSV export
+// lives on the Procurement tab (js/procurement.js).
 
-import { state, resetForRegenerate, estimateTotalBudget } from './state.js';
+import { state, resetForRegenerate } from './state.js';
 import { api } from './api.js';
-import { toast } from './utils.js';
-import { exportAuditCsv } from './inventory.js';
+import { toast, glossProvince, resolveProvince } from './utils.js';
 
 function friendlyDayName(run_id, day_index) {
   const match = state.generatedDays.find((d) => d.runId === run_id && d.dayIndex === day_index);
   return match ? match.name : `Run #${run_id} · Day ${day_index + 1}`;
 }
 
-/** Populate the read-only/editable parameter fields and the feedback log. */
+/** Reflect the budget-mode toggle's active button in state.budgetMode. */
+function setBudgetModeButtons(mode) {
+  document.querySelectorAll('#setBudgetMode button').forEach((b) => {
+    b.classList.toggle('active', (b.dataset.mode === 'per') === (mode === 'per_portion'));
+  });
+}
+
+/** Populate the editable parameter fields and the feedback log with the
+ * actual values currently in state — not a derived/computed figure that
+ * only coincidentally resembles what the operator typed. Budget in
+ * particular used to always show a computed *total* even when the operator
+ * had entered a per-portion figure, so "Rp 3,500,000" appeared for someone
+ * who only ever typed "14,000" — this shows state.budgetValue verbatim,
+ * with the toggle reflecting which unit it's actually in. */
 export async function renderSettingsTab() {
-  document.getElementById('setLocation').value = document.getElementById('sumLocation').textContent || '';
+  document.getElementById('setLocation').value =
+    state.province ? glossProvince(state.province) : state.location;
   document.getElementById('setPeople').value = state.people;
-  document.getElementById('setBudget').value = Math.round(
-    estimateTotalBudget(state.generatedDays.length)).toLocaleString('en-US');
-  document.getElementById('setDuration').value = document.getElementById('sumDuration').textContent || '';
+  document.getElementById('setBudget').value = Math.round(state.budgetValue).toLocaleString('en-US');
+  setBudgetModeButtons(state.budgetMode);
+  document.getElementById('setDuration').value =
+    ['3', '5', '7'].includes(state.selectedDuration) ? state.selectedDuration : 'custom';
 
   const list = document.getElementById('settingsFeedbackList');
   let rejections = [];
@@ -41,60 +56,6 @@ export async function renderSettingsTab() {
   }
 }
 
-/** Reconstruct a /api/report-shaped body from the first generated week's
- * resolved Agen Gizi / Agen Biaya parameters, so the printable report
- * matches what the operator actually saw on the Plan tab. */
-function reportBodyForFirstWeek() {
-  const week = state.weeks[0];
-  if (!week) return null;
-  const days = state.generatedDays.filter((d) => d.runId === week.runId).length;
-  return {
-    days, stage: week.resolved.stage, portions: state.people,
-    province: week.resolved.province, island: week.resolved.island || '',
-    budget_per_portion_idr: week.resolved.budget_per_portion_idr,
-    ingredient_budget_share: week.resolved.ingredient_budget_share,
-    regional_cost_index: week.resolved.regional_cost_index || 1.0,
-    exclude_terms: week.resolved.exclude_terms || [],
-    enforce_micronutrients: week.resolved.enforce_micronutrients || false,
-    sppg_name: '', lang: 'en',
-  };
-}
-
-async function handleExport(type) {
-  if (type === 'csv') {
-    await exportAuditCsv();
-    toast('Audit CSV downloaded.');
-    return;
-  }
-  if (type === 'pdf') {
-    const body = reportBodyForFirstWeek();
-    if (!body) { toast('Generate a plan first.'); return; }
-    // Open the tab synchronously, in the same gesture as the click — opening
-    // it after the `await` below is a same-origin no-op in most browsers,
-    // but cross-origin/deployed contexts can treat it as an untrusted popup
-    // and silently block it.
-    const win = window.open('', '_blank');
-    try {
-      const html = await api.report(body);
-      if (win) {
-        win.document.write(html);
-        win.document.close();
-        toast('Report opened in a new tab — use your browser\'s Print to save as PDF.');
-      } else {
-        toast('Report generated, but the popup was blocked — allow popups for this site and try again.');
-      }
-    } catch (err) {
-      if (win) win.close();
-      toast(`Couldn't build the report: ${err.message}`);
-    }
-    return;
-  }
-  // "Save as image" needs a client-side rasteriser (e.g. html2canvas) that
-  // this app deliberately doesn't depend on — point the operator at the
-  // browser's own screenshot/print tools instead of faking success.
-  toast('Use your browser\'s screenshot tool, or export to PDF and print to image.');
-}
-
 /**
  * Wire up the Settings tab. `callbacks` lets this module trigger a full
  * re-render of the other tabs after "Regenerate Plan" without importing
@@ -110,17 +71,70 @@ async function handleExport(type) {
  * }} callbacks
  */
 export function initSettingsTab(callbacks) {
-  document.querySelectorAll('.export-option').forEach((opt) => {
-    opt.addEventListener('click', async () => {
-      await handleExport(opt.dataset.type);
-      opt.classList.add('done');
-    });
+  // Visual only — like onboarding's own budget toggle, picking a mode here
+  // doesn't touch state.budgetMode until "Apply & Regenerate" reads it, so
+  // nothing about the live plan changes just from clicking around this tab.
+  document.querySelectorAll('#setBudgetMode button').forEach((b) => {
+    b.addEventListener('click', () => setBudgetModeButtons(b.dataset.mode === 'per' ? 'per_portion' : 'total'));
   });
 
-  document.getElementById('settingsRegenerate').addEventListener('click', async () => {
+  document.getElementById('setLocation').addEventListener('input', (e) => {
+    e.target.classList.remove('input-error');
+  });
+
+  const regenerateBtn = document.getElementById('settingsRegenerate');
+  regenerateBtn.addEventListener('click', async () => {
+    // Without this, a second click while a regenerate is still in flight
+    // races its own resetForRegenerate()/buildTray() against the first's —
+    // whichever resetForRegenerate() runs last can clear state.generatedDays
+    // after the other call already returned, leaving the tray permanently
+    // empty ("0 days") with no error, since both requests genuinely
+    // succeeded server-side. Disabling the button for the duration removes
+    // the race instead of trying to detect it after the fact.
+    if (regenerateBtn.disabled) return;
+    regenerateBtn.disabled = true;
+
+    // Every field is read and applied here, in this one place, only on this
+    // one click — nothing regenerates from just editing a field. Previously
+    // only "Number of people" actually did anything: editing location,
+    // budget, or duration and clicking regenerate silently kept the old
+    // values, which is exactly backwards from what "these values were set
+    // during onboarding" implies a reader should be able to do.
     const newPeople = parseInt(document.getElementById('setPeople').value, 10);
     if (newPeople) state.people = newPeople;
+
+    // An edited location that doesn't resolve to a real corpus province used
+    // to silently regenerate with no regional preference at all — the same
+    // "planned without a location" gap onboarding had. Block the regenerate
+    // instead, same as onboarding's own location field now does.
+    const locationText = document.getElementById('setLocation').value.trim();
+    if (locationText) {
+      const resolvedProvince = resolveProvince(locationText);
+      if (!resolvedProvince) {
+        toast("Couldn't match that location to a province, pick one, or leave it as is.");
+        document.getElementById('setLocation').classList.add('input-error');
+        regenerateBtn.disabled = false;
+        return;
+      }
+      document.getElementById('setLocation').classList.remove('input-error');
+      state.location = locationText;
+      state.province = resolvedProvince;
+    }
+
+    const newBudget = parseFloat(document.getElementById('setBudget').value.replace(/[^\d.]/g, ''));
+    if (Number.isFinite(newBudget) && newBudget > 0) state.budgetValue = newBudget;
+    const perActive = document.querySelector('#setBudgetMode button[data-mode="per"]').classList.contains('active');
+    state.budgetMode = perActive ? 'per_portion' : 'total';
+
+    const durationChoice = document.getElementById('setDuration').value;
+    if (durationChoice !== 'custom') state.selectedDuration = durationChoice;
+    // 'custom' intentionally leaves state.selectedDuration/customSelectedDays/
+    // customWeeks untouched — editing a custom day-of-week pick isn't
+    // exposed in this compact form, only from onboarding itself.
+
     callbacks.updatePeopleDisplay();
+    document.getElementById('sumLocation').textContent =
+      state.province ? glossProvince(state.province) : state.location;
 
     resetForRegenerate();
     try {
@@ -132,6 +146,8 @@ export function initSettingsTab(callbacks) {
       toast('Plan regenerated with updated settings.');
     } catch (err) {
       toast(`Couldn't regenerate: ${err.message}`);
+    } finally {
+      regenerateBtn.disabled = false;
     }
   });
 }

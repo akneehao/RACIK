@@ -33,8 +33,11 @@ Budget, tray composition, reference portions. Everything here is **policy, not
 physics**: editable per SPPG and per region. Start here because every later file
 reads these.
 
-Look at: `MBGConfig.ingredient_budget_idr` — Rp10,000 × 70%, and the comment
-explaining that the 70% is a per-kitchen allocation, not a legislated line item.
+Look at: `MBGConfig.ingredient_budget_idr` — Rp10,000 × 100% by default (the
+operator's budget input is Racik's own food/ingredient budget, not an
+all-inclusive program pagu with labour and logistics folded in), and the
+comment explaining why that's a distinct thing from BGN's separate ~70/20/10
+national-pagu split.
 
 ### 2. `racik/akg.py` — what a child needs *(148 lines)*
 AKG 2019 age bands. The important structure is the **two tiers of trust**:
@@ -143,7 +146,7 @@ numbers without their caveats.
 ## Verifying the claims
 
 ```bash
-python -m pytest tests -q          # 137 tests, no network, no API key
+python -m pytest tests -q          # 202 tests, no network, no API key
 python scripts/build_db.py         # rebuild every number from source, ~30 s
 ```
 

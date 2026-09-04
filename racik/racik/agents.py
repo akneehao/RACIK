@@ -70,8 +70,14 @@ _GIZI_TOOL = [{
                           "description": "School stage the notes imply, if any."},
                 "exclude_terms": {
                     "type": "array", "items": {"type": "string"},
-                    "description": "Allergens or ingredients to exclude, read "
-                                   "from the notes (e.g. ['udang','kacang'])."},
+                    "description": "Concrete food/ingredient/flavor words to "
+                                   "exclude, each one that could literally "
+                                   "appear in a dish's name or ingredient "
+                                   "list (e.g. ['udang','kacang','pedas']). "
+                                   "Never an abstract reason like 'too "
+                                   "expensive' — that matches no dish text "
+                                   "and silently excludes nothing; cost "
+                                   "concerns belong in the rationale, not here."},
                 "enforce_micronutrients": {
                     "type": "boolean",
                     "description": "True only if the notes explicitly ask for "
@@ -105,6 +111,25 @@ _STAGE_PATTERN = [
     ("smp", r"\bsmp\b|\bmts\b|menengah pertama"),
     ("sd", r"\bsd\b|\bmi\b|sekolah dasar"),
 ]
+
+# exclude_terms is a text filter matched against dish/ingredient text (G3 in
+# optimizer.py's candidate funnel) — despite the system prompt telling it not
+# to, the model has repeatedly turned a cost-driven rejection pattern into a
+# literal price-word "exclude_term" ("too expensive", "mahal", "terlalu
+# mahal", "harga mahal"). In English this is inert (the corpus is Indonesian,
+# so it matches nothing); in Indonesian it's actively harmful, since "mahal"
+# can genuinely appear in scraped recipe commentary and silently knock out
+# unrelated dishes for a reason that has nothing to do with their content —
+# confirmed live: adequacy dropped across every day of a run after this
+# happened. Cost belongs to Agen Biaya, never to a content filter, so this is
+# enforced in code rather than trusted to prompt wording alone.
+_COST_TERM_PATTERN = re.compile(
+    r"mahal|expensive|murah|cheap|harga|price|biaya|cost|budget|pagu",
+    re.IGNORECASE)
+
+
+def _drop_cost_terms(terms: list[str]) -> list[str]:
+    return [t for t in terms if not _COST_TERM_PATTERN.search(t)]
 
 
 def agent_gizi(client: SeaLionClient, *, stage_hint: Optional[str],
@@ -142,8 +167,16 @@ def _agent_gizi_llm(client: SeaLionClient, stage_hint: Optional[str],
               "hard-excluded by the pipeline before you run — you don't need "
               "to re-list them in exclude_terms — but look for a *pattern* "
               "across them (e.g. repeatedly rejecting spicy or fish dishes) "
-              "and add a broader exclude_term or note it in your rationale "
-              "if one is clear.")
+              "and add a broader exclude_term for it if one is clear.\n\n"
+              "exclude_terms is a text filter: each entry must be a concrete "
+              "food/ingredient/flavor word that would literally appear in a "
+              "dish's name or ingredient list (e.g. 'udang', 'pedas', 'kacang') "
+              "— never an abstract reason like 'too expensive' or 'not "
+              "popular', which can't match any dish text and would silently "
+              "do nothing. If the pattern you notice is about cost rather "
+              "than content (e.g. repeatedly rejected as too expensive), that "
+              "is Agen Biaya's job, not exclude_terms — just name the pattern "
+              "in your rationale instead.")
     stage_desc = stage_hint or "(none - infer it from the notes, default sd if unclear)"
     notes_desc = notes_text or "(none given)"
     user = (f"Requested language: {lang}\n"
@@ -157,7 +190,8 @@ def _agent_gizi_llm(client: SeaLionClient, stage_hint: Optional[str],
         raise SeaLionError("agent_gizi: model returned no tool call")
     args = reply.tool_calls[0].arguments
     params = {
-        "exclude_terms": [str(x) for x in args.get("exclude_terms", []) if str(x).strip()],
+        "exclude_terms": _drop_cost_terms(
+            [str(x) for x in args.get("exclude_terms", []) if str(x).strip()]),
         "enforce_micronutrients": bool(args.get("enforce_micronutrients", False)),
     }
     stage = args.get("stage")
@@ -176,13 +210,16 @@ def _agent_gizi_rule(stage_hint: Optional[str], notes_text: str,
             term = _LEADING_MARKER.sub("", term.strip()).strip()
             if 2 < len(term) < 25:
                 excluded.append(term)
+    # Filtered before use anywhere, so the rationale text never names a term
+    # that isn't actually in exclude_terms — see _drop_cost_terms' docstring.
+    excluded = _drop_cost_terms(excluded[:6])
     stage = stage_hint if stage_hint in SCHOOL_STAGES else None
     if not stage:
         for key, pattern in _STAGE_PATTERN:
             if re.search(pattern, low):
                 stage = key
                 break
-    params: dict[str, Any] = {"exclude_terms": excluded[:6],
+    params: dict[str, Any] = {"exclude_terms": excluded,
                               "enforce_micronutrients": False}
     if stage:
         params["stage"] = stage
@@ -216,9 +253,16 @@ _BIAYA_TOOL = [{
             "type": "object",
             "properties": {
                 "ingredient_budget_share": {
-                    "type": "number", "minimum": 0.4, "maximum": 0.9,
+                    "type": "number", "minimum": 0.85, "maximum": 1.0,
                     "description": "Share of the per-portion budget available "
-                                   "for raw ingredients (BGN default 0.70)."},
+                                   "for raw ingredients. Default 1.0 — the "
+                                   "operator's budget input is already scoped "
+                                   "to food/ingredients, not an all-inclusive "
+                                   "program pagu, so none of it is reserved "
+                                   "for labour/operations by default. Go "
+                                   "below 1.0 only if the notes explicitly "
+                                   "call out a non-ingredient cost to cover "
+                                   "from this same budget."},
                 "regional_cost_index": {
                     "type": "number", "minimum": 0.7, "maximum": 1.6,
                     "description": "Multiplier for regional price differences; "
@@ -271,8 +315,11 @@ def _agent_biaya_llm(client: SeaLionClient, budget_per_portion_idr: float,
             f"Portions per day: {portions}\n"
             f"Province: {province or '(not specified)'}\n"
             f"{market_line}\n"
-            "BGN's standing default split is 70% ingredients / 20% operations "
-            "/ 10% incentives; only deviate the ingredient share with a clear reason.")
+            "This budget is the operator's own food/ingredient budget for "
+            "the plan, not an all-inclusive program pagu — it does not need "
+            "a share held back for labour or operations. Use "
+            "ingredient_budget_share=1.0 unless the notes explicitly say "
+            "some of this same budget must also cover a non-ingredient cost.")
     reply: ChatResult = client.chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         tools=_BIAYA_TOOL, tool_choice="auto")
@@ -281,7 +328,7 @@ def _agent_biaya_llm(client: SeaLionClient, budget_per_portion_idr: float,
     args = reply.tool_calls[0].arguments
     params = {
         "ingredient_budget_share": _clamp(
-            float(args.get("ingredient_budget_share", 0.70)), 0.4, 0.9),
+            float(args.get("ingredient_budget_share", 1.0)), 0.85, 1.0),
         "regional_cost_index": _clamp(
             float(args.get("regional_cost_index", market_index)), 0.7, 1.6),
     }
@@ -292,11 +339,12 @@ def _agent_biaya_llm(client: SeaLionClient, budget_per_portion_idr: float,
 def _agent_biaya_rule(budget_per_portion_idr: float, portions: int,
                       province: str, market_index: float,
                       lang: str) -> AgentAdvice:
-    # Ingredient share is BGN's standing default, undisturbed — the
-    # rule-based path's job is to keep the pipeline honest and complete, not
-    # to invent a budget policy. The regional index, though, comes straight
-    # from real WFP retail price data when the province has coverage.
-    params = {"ingredient_budget_share": 0.70, "regional_cost_index": market_index}
+    # The operator's budget input is the food/ingredient budget itself, not
+    # an all-inclusive program pagu — nothing held back for labour/ops by
+    # default (see MBGConfig.ingredient_budget_share's docstring). The
+    # regional index, though, comes straight from real WFP retail price data
+    # when the province has coverage.
+    params = {"ingredient_budget_share": 1.0, "regional_cost_index": market_index}
     key = ("agent.biaya.rationale_rule_market" if market_index != 1.0
           else "agent.biaya.rationale_rule")
     rationale = t(lang, key, budget=f"{budget_per_portion_idr:,.0f}",

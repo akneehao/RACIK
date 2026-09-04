@@ -37,7 +37,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "salah satu batas ditampilkan sebagai pelonggaran, bukan "
             "disembunyikan. 6 zat gizi mikro (kalsium, besi, seng, vitamin A, "
             "vitamin C, natrium) dihitung dan ditampilkan sebagai informasi "
-            "saja — bukan batasan — karena nilai AKG 2019 untuk zat ini "
+            "saja, bukan batasan, karena nilai AKG 2019 untuk zat ini "
             "berbeda antar sumber sekunder."),
         "note.method": (
             "Nilai gizi berasal dari TKPI 2020 atas dasar berat mentah, "
@@ -46,7 +46,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "retensi bersifat perkiraan."),
         "note.servings": (
             "Jumlah porsi tiap resep korpus diperkirakan dari massa bahan "
-            "terhadap porsi rujukan Isi Piringku — resep sumber tidak "
+            "terhadap porsi rujukan Isi Piringku; resep sumber tidak "
             "mencantumkan hasil jadi."),
         "note.prices": (
             "Harga bahan memakai snapshot nasional bertanggal. Endpoint harian "
@@ -72,7 +72,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "Biaya bahan rata-rata Rp{cost} per porsi (pagu bahan Rp{budget}). "
             "Pemenuhan AKG rata-rata {adequacy}."),
         "plan.day": (
-            "Hari {day} — Rp{cost} · {kcal} kkal · {protein} g protein · AKG {adequacy}"),
+            "Hari {day}: Rp{cost} · {kcal} kkal · {protein} g protein · AKG {adequacy}"),
         "plan.relax_header": "Batas gizi yang dilonggarkan:",
         "plan.relax_row": (
             "  · Hari {day} {nutrient}: kurang {short} dari {target} ({share})"),
@@ -90,7 +90,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "Tidak ada catatan alergi/preferensi khusus; menggunakan batas "
             "gizi standar untuk jenjang ini."),
         "agent.gizi.rationale_rule_terms": (
-            "Jenjang {stage}. Catatan operator menyebut: {terms} — dikecualikan "
+            "Jenjang {stage}. Catatan operator menyebut: {terms}, dikecualikan "
             "dari resep kandidat."),
         "agent.gizi.rationale_rule_plain": (
             "Jenjang {stage}. Tidak ada istilah pengecualian yang terdeteksi "
@@ -99,14 +99,14 @@ STRINGS: dict[str, dict[str, str]] = {
             "{count} hidangan yang pernah ditolak operator dikecualikan dari "
             "resep kandidat (alasan: {reasons})."),
         "agent.biaya.rationale_default": (
-            "Menggunakan pembagian anggaran standar BGN (70% bahan baku)."),
+            "Seluruh anggaran yang dimasukkan operator dipakai untuk bahan baku."),
         "agent.biaya.rationale_rule": (
-            "Pagu per porsi Rp{budget}. Tanpa data harga daerah langsung, "
-            "memakai pembagian standar BGN 70% bahan baku dan indeks harga "
-            "nasional (1,0x) untuk provinsi {province}."),
+            "Pagu per porsi Rp{budget}, seluruhnya untuk bahan baku. Tanpa "
+            "data harga daerah langsung, memakai indeks harga nasional (1,0x) "
+            "untuk provinsi {province}."),
         "agent.biaya.rationale_rule_market": (
-            "Pagu per porsi Rp{budget}. Memakai pembagian standar BGN 70% "
-            "bahan baku; indeks kemahalan {province} sebesar {index}x berasal "
+            "Pagu per porsi Rp{budget}, seluruhnya untuk bahan baku; indeks "
+            "kemahalan {province} sebesar {index}x berasal "
             "dari data survei harga eceran WFP, bukan asumsi."),
         "validator.pass": (
             "Tervalidasi: seluruh {days} hari memenuhi batas gizi AKG dan pagu "
@@ -122,11 +122,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "note.compliance_method": (
             "One MBG meal is designed to cover about 1/3 of daily AKG 2019 "
             "({fraction}). A day is scored as 'meeting the standard' when the "
-            "total of all 5 binding macro nutrients — energy, protein, fat, "
-            "carbohydrate, fibre — reaches 100% of its target; a shortfall on "
+            "total of all 5 binding macro nutrients (energy, protein, fat, "
+            "carbohydrate, fibre) reaches 100% of its target; a shortfall on "
             "any one is reported as a relaxation, never hidden. 6 micronutrients "
             "(calcium, iron, zinc, vitamin A, vitamin C, sodium) are computed "
-            "and shown for information only — not enforced — because "
+            "and shown for information only, not enforced, because "
             "secondary sources disagree on their AKG 2019 values."),
         "note.method": (
             "Nutrient values come from TKPI 2020 on a raw-weight basis, adjusted "
@@ -135,7 +135,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "approximations."),
         "note.servings": (
             "Serving counts for corpus recipes are estimated from ingredient "
-            "mass against Isi Piringku reference portions — the source recipes "
+            "mass against Isi Piringku reference portions; the source recipes "
             "do not state a yield."),
         "note.prices": (
             "Ingredient prices use a dated national snapshot. The daily Bapanas "
@@ -159,7 +159,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "Mean ingredient cost Rp{cost} per portion (ingredient budget "
             "Rp{budget}). Mean AKG adequacy {adequacy}."),
         "plan.day": (
-            "Day {day} — Rp{cost} · {kcal} kcal · {protein} g protein · AKG {adequacy}"),
+            "Day {day}: Rp{cost} · {kcal} kcal · {protein} g protein · AKG {adequacy}"),
         "plan.relax_header": "Relaxed nutrient floors:",
         "plan.relax_row": (
             "  · Day {day} {nutrient}: short {short} of {target} ({share})"),
@@ -176,7 +176,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "No allergy/preference notes given; using the standard nutrient "
             "floors for this stage."),
         "agent.gizi.rationale_rule_terms": (
-            "Stage {stage}. The operator's notes mention: {terms} — excluded "
+            "Stage {stage}. The operator's notes mention: {terms}, excluded "
             "from candidate recipes."),
         "agent.gizi.rationale_rule_plain": (
             "Stage {stage}. No exclusion terms detected in the notes; using "
@@ -185,14 +185,14 @@ STRINGS: dict[str, dict[str, str]] = {
             "{count} previously-rejected dish(es) excluded from candidate "
             "recipes (reasons: {reasons})."),
         "agent.biaya.rationale_default": (
-            "Using BGN's standard budget split (70% raw ingredients)."),
+            "The operator's full budget input is used for raw ingredients."),
         "agent.biaya.rationale_rule": (
-            "Per-portion pagu Rp{budget}. With no live regional price feed, "
-            "using BGN's standard 70% ingredient split and the national price "
-            "index (1.0x) for {province}."),
+            "Per-portion pagu Rp{budget}, all of it for raw ingredients. With "
+            "no live regional price feed, using the national price index "
+            "(1.0x) for {province}."),
         "agent.biaya.rationale_rule_market": (
-            "Per-portion pagu Rp{budget}. Using BGN's standard 70% ingredient "
-            "split; {province}'s {index}x regional cost index comes from the "
+            "Per-portion pagu Rp{budget}, all of it for raw ingredients; "
+            "{province}'s {index}x regional cost index comes from the "
             "WFP retail price survey, not an assumption."),
         "validator.pass": (
             "Validated: all {days} day(s) meet the AKG nutrient floors and the "

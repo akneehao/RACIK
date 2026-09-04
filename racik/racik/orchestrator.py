@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -126,7 +127,10 @@ TOOL_SCHEMAS: list[dict] = [
                         "description": "Total pagu per portion in rupiah (default 10000)."},
                     "ingredient_budget_share": {
                         "type": "number",
-                        "description": "Share of the pagu available for raw ingredients (default 0.7)."},
+                        "description": "Share of the pagu available for raw "
+                                       "ingredients (default 1.0 — the pagu "
+                                       "is already a food/ingredient budget, "
+                                       "not an all-inclusive program budget)."},
                     "exclude_terms": {
                         "type": "array", "items": {"type": "string"},
                         "description": "Allergens or ingredients to exclude, e.g. ['udang','telur']."},
@@ -647,13 +651,23 @@ class RacikOrchestrator:
         # either agent decides, so a rejected dish never silently resurfaces.
         feedback = state.rejected_dishes(limit=20)
 
-        gizi = agent_gizi(self.client, stage_hint=stage, notes_text=notes_text,
-                          feedback_history=feedback, lang=lang)
+        # Independent calls (neither reads the other's output — see the
+        # module docstring's workflow diagram, where they run side by side)
+        # sharing one client instance, which is safe: SeaLionClient locks its
+        # own throttle-and-send sequence, and boto3 clients are documented
+        # thread-safe. Running them on two threads instead of one-after-
+        # another overlaps their network latency instead of paying it twice.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            gizi_future = pool.submit(agent_gizi, self.client, stage_hint=stage,
+                                      notes_text=notes_text, feedback_history=feedback,
+                                      lang=lang)
+            biaya_future = pool.submit(agent_biaya, self.client,
+                                       budget_per_portion_idr=budget_per_portion,
+                                       portions=portions, province=province_r,
+                                       price_table=self.price_table, lang=lang)
+            gizi = gizi_future.result()
+            biaya = biaya_future.result()
         trace.append(gizi.to_dict())
-
-        biaya = agent_biaya(self.client, budget_per_portion_idr=budget_per_portion,
-                            portions=portions, province=province_r,
-                            price_table=self.price_table, lang=lang)
         trace.append(biaya.to_dict())
 
         resolved_stage = gizi.params.get("stage") or (
@@ -713,6 +727,33 @@ class RacikOrchestrator:
                 cp_sat_note = (f" Retried without the {history_days}-day "
                                f"rotation window (kept explicit vetoes) after "
                                f"the first attempt found no candidates.")
+
+        # Agen Gizi's exclude_terms are a semantic judgement call (e.g. a
+        # generic "kacang" for "cut expensive nuts/shrimp" can also knock out
+        # unrelated soy-based staples like tempeh/tofu) — a real category of
+        # LLM output that should degrade the plan, never break it entirely.
+        # If exclusions are still the reason nothing solves, drop them and
+        # retry once more; explicit dish-id vetoes (operator rejections,
+        # this run's own exclusions) are exact matches, not judgement calls,
+        # and stay in force either way.
+        if not result.feasible and resolved["exclude_terms"]:
+            retry_request = PlanRequest(
+                days=days, stage=resolved_stage, portions=portions,
+                province=province_r, island=island, config=config,
+                exclude_terms=[],
+                exclude_dish_ids=list(exclude_ids),
+                enforce_micronutrients=resolved["enforce_micronutrients"],
+                max_solve_seconds=12.0,
+            )
+            retried = self.optimizer.solve(retry_request)
+            if retried.feasible:
+                result = retried
+                dropped = ", ".join(resolved["exclude_terms"])
+                cp_sat_note = (f" Retried without Agen Gizi's exclusion terms "
+                               f"({dropped}) after they left no feasible menu — "
+                               f"they were too broad a filter, not a hard "
+                               f"requirement.")
+                resolved["exclude_terms"] = []
 
         trace.append({
             "agent": "cp_sat", "source": "solver",

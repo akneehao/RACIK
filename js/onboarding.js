@@ -6,30 +6,28 @@
 
 import { state } from './state.js';
 import { api } from './api.js';
-import { showScreen, setOnboardingStep, toast } from './utils.js';
+import { showScreen, setOnboardingStep, toast, glossProvince, resolveProvince } from './utils.js';
 
-// The mockup's four suggestion chips are English city/region names; the
-// backend's corpus provinces are Indonesian. This is the one translation
-// table needed to resolve the shipped suggestions to a real province —
-// arbitrary free-typed text is matched directly against the live province
-// list instead (see resolveProvince below), so nothing else needs a lookup.
-const SUGGESTION_PROVINCE_HINTS = {
-  'bandung, west java': 'jawa barat',
-  'makassar, south sulawesi': 'sulawesi selatan',
-  'medan, north sumatra': 'sumatera utara',
-  'yogyakarta, d.i. yogyakarta': 'yogyakarta',
-};
-
-/** Resolve free-typed or suggestion-picked location text to a corpus province,
- * or '' if nothing matches (the backend then plans with no regional preference). */
-function resolveProvince(text) {
-  const low = (text || '').trim().toLowerCase();
-  if (!low) return '';
-  const hint = SUGGESTION_PROVINCE_HINTS[low];
-  const needle = hint || low;
-  const found = state.provinces.find((p) => p.province.toLowerCase().includes(needle))
-    || state.provinces.find((p) => needle.includes(p.province.toLowerCase()));
-  return found ? found.province : '';
+/** Render the location suggestion dropdown from the real corpus province
+ * list (33 provinces, from /api/meta) filtered by whatever's typed so far —
+ * replaces four hardcoded example cities that made the location picker
+ * look far more limited than the backend actually is. Shown in English
+ * (clicking one fills the input with the English name too); resolveProvince()
+ * matches either language back to the real corpus record. */
+function renderLocationSuggestions(filterText) {
+  const box = document.getElementById('locSuggestions');
+  const low = (filterText || '').trim().toLowerCase();
+  // Filter against both the raw Indonesian corpus name and its English gloss
+  // — the operator may type either ("jawa barat" or "west java") — but always
+  // display the English gloss, so the shown label is consistent either way.
+  const matches = state.provinces
+    .filter((p) => !low || p.province.toLowerCase().includes(low)
+      || glossProvince(p.province).toLowerCase().includes(low))
+    .map((p) => glossProvince(p.province))
+    .sort((a, b) => a.localeCompare(b));
+  box.innerHTML = matches.length
+    ? matches.map((name) => `<button type="button">${name}</button>`).join('')
+    : '<button type="button" disabled>No matching province</button>';
 }
 
 function summarizeCustom() {
@@ -41,21 +39,53 @@ function initLocationScreen() {
   const locInput = document.getElementById('locationInput');
   const locSuggestions = document.getElementById('locSuggestions');
 
-  locInput.addEventListener('focus', () => locSuggestions.classList.add('show'));
+  locInput.addEventListener('focus', () => {
+    renderLocationSuggestions(locInput.value);
+    locSuggestions.classList.add('show');
+  });
+  locInput.addEventListener('input', () => renderLocationSuggestions(locInput.value));
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.loc-field')) locSuggestions.classList.remove('show');
   });
-  locSuggestions.querySelectorAll('button').forEach((b) => {
-    b.addEventListener('click', () => {
-      locInput.value = b.textContent;
-      locSuggestions.classList.remove('show');
-    });
+  // Suggestions re-render on every keystroke, so bind clicks once via
+  // delegation on the container rather than per-button.
+  locSuggestions.addEventListener('click', (e) => {
+    const b = e.target.closest('button:not([disabled])');
+    if (!b) return;
+    locInput.value = b.textContent;
+    locSuggestions.classList.remove('show');
   });
 
+  // A location silently defaulting to "Bandung, West Java" meant a plan
+  // could be generated for the wrong region without the operator ever
+  // choosing one — regional price index and dish preference both depend on
+  // it, so it's required, not a convenience default.
+  locInput.addEventListener('input', () => locInput.classList.remove('input-error'));
+
   document.getElementById('startBtn').addEventListener('click', () => {
-    state.location = locInput.value || 'Bandung, West Java';
-    state.province = resolveProvince(state.location);
-    document.getElementById('sumLocation').textContent = state.location;
+    const typed = locInput.value.trim();
+    if (!typed) {
+      toast('Please enter a location first.');
+      locInput.classList.add('input-error');
+      locInput.focus();
+      return;
+    }
+    const resolvedProvince = resolveProvince(typed);
+    if (!resolvedProvince) {
+      toast("Couldn't match that to a province, pick one from the list.");
+      locInput.classList.add('input-error');
+      renderLocationSuggestions(typed);
+      locSuggestions.classList.add('show');
+      return;
+    }
+
+    state.location = typed;
+    state.province = resolvedProvince;
+    // Show the resolved corpus province's English name — the canonical,
+    // confirmed value — rather than echoing back whatever raw text was
+    // typed (which could be any capitalization/language/city name that
+    // happened to match).
+    document.getElementById('sumLocation').textContent = glossProvince(state.province);
     showScreen('screen-2');
     setOnboardingStep(2);
   });
@@ -127,6 +157,10 @@ function updateBudgetSummary() {
     : state.budgetValue;
   document.getElementById('sumPerPortion').textContent =
     `≈ Rp ${Math.round(perPortion).toLocaleString('en-US')}`;
+  const budgetLabel = state.budgetMode === 'total'
+    ? `Rp ${Math.round(state.budgetValue).toLocaleString('en-US')} total`
+    : `Rp ${Math.round(state.budgetValue).toLocaleString('en-US')} / portion`;
+  document.getElementById('sumBudget').textContent = budgetLabel;
 }
 
 function initBudgetControls() {
@@ -194,6 +228,7 @@ async function loadMeta() {
   try {
     const meta = await api.meta();
     state.provinces = meta.provinces;
+    renderLocationSuggestions(document.getElementById('locationInput').value);
   } catch (err) {
     // The app still works with no regional preference if /api/meta is
     // briefly unreachable; onboarding.js doesn't need to block on it.

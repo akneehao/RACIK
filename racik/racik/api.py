@@ -29,6 +29,7 @@ from .sealion import SeaLionClient
 from .statedb import StateStore
 from .store import RacikStore
 from .translate import DishTranslator
+from .recipe_text import StepsTranslator
 
 app = FastAPI(title="Racik", version="0.1.0",
               description="AKG-grounded MBG menu planning for Indonesia")
@@ -151,7 +152,8 @@ def dish(dish_id: int) -> dict:
     if found is None:
         raise HTTPException(404, f"dish {dish_id} not found")
     payload = found.to_dict()
-    payload["steps"] = found.steps
+    rewritten = _steps_translator().translate(dish_id, found.steps)
+    payload.update(rewritten.to_dict())
     payload["main_food"] = found.main_food_name
     payload["ingredients"] = [
         {
@@ -245,6 +247,17 @@ def health() -> dict:
 @lru_cache(maxsize=1)
 def _translator() -> DishTranslator:
     return DishTranslator(make_client())
+
+
+@lru_cache(maxsize=1)
+def _steps_translator() -> StepsTranslator:
+    # Deliberately hosted SEA-LION (SeaLionClient's own default), not
+    # make_client()/Bedrock: the source text is Bahasa Indonesia home-cook
+    # notes, and SEA-LION is trained specifically on Southeast Asian
+    # languages — a better fit for this rewrite than the general-purpose
+    # model driving Agen Gizi/Agen Biaya. Needs SEALION_API_KEY in .env;
+    # falls back to the same-language rule-based cleanup without one.
+    return StepsTranslator()
 
 
 @lru_cache(maxsize=1)
@@ -406,17 +419,34 @@ def stock_list(run_id: int) -> dict:
 # The styled operator frontend (root index.html/css/js) is the primary UI;
 # the plainer Indonesian reference implementation stays reachable at /legacy.
 
+
+class _NoCacheStaticFiles(StaticFiles):
+    """Serves ETag/Last-Modified as usual but forces revalidation on every
+    request. Without this, browsers apply heuristic caching to JS/CSS with
+    no Cache-Control header and can keep serving a stale frontend build
+    indefinitely after a redeploy or local edit."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
     if (FRONTEND_DIR / "css").exists():
-        app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"),
+        app.mount("/css", _NoCacheStaticFiles(directory=FRONTEND_DIR / "css"),
                  name="frontend-css")
     if (FRONTEND_DIR / "js").exists():
-        app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"),
+        app.mount("/js", _NoCacheStaticFiles(directory=FRONTEND_DIR / "js"),
                  name="frontend-js")
+    if (FRONTEND_DIR / "assets").exists():
+        app.mount("/assets", _NoCacheStaticFiles(directory=FRONTEND_DIR / "assets"),
+                 name="frontend-assets")
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return FileResponse(FRONTEND_DIR / "index.html",
+                            headers={"Cache-Control": "no-cache"})
 
 elif UI_DIR.exists():
     @app.get("/")

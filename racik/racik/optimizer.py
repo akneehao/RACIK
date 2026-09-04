@@ -39,6 +39,7 @@ COST_SCALE = 1            # rupiah are already integers
 W_NUTRIENT_SLACK = 400
 W_BUDGET_SLACK = 900
 W_COST = 1
+W_UNDERSPEND = 8
 W_PREFERENCE = 250
 W_QUALITY = 120
 
@@ -454,7 +455,20 @@ class MenuOptimizer:
             budget_slack[d] = over
             model.Add(sum(cost_terms) <= budget + over)
 
+            # Pure cost-minimisation (W_COST alone) had no reason to spend a
+            # rupiah more than the nutrient floors required, so a solve
+            # routinely landed 30-45% under the per-portion pagu — budget the
+            # program actually allocated, sitting unused rather than buying
+            # more/better food. `under` mirrors `over`'s shape on the other
+            # side of the ceiling: minimising it pulls spend up toward the
+            # budget (never past it — `over` still owns that side), with
+            # W_COST left in only as a light tie-breaker among otherwise
+            # equal options, not the dominant term it was before.
+            under = model.NewIntVar(0, budget, f"under_{d}")
+            model.Add(under >= budget - sum(cost_terms))
+
             penalties.append(W_BUDGET_SLACK * over)
+            penalties.append(W_UNDERSPEND * under)
             penalties.append(W_COST * sum(cost_terms))
             penalties.append(-sum(preference_terms))
             penalties.append(-sum(quality_terms))

@@ -203,8 +203,11 @@ def test_blend_reports_the_band_it_under_serves():
     assert hungriest.protein_g >= blend.protein_g
 
 
-def test_ingredient_budget_is_seventy_percent():
-    assert MBG.ingredient_budget_idr == pytest.approx(7000.0)
+def test_ingredient_budget_is_the_full_operator_input():
+    # The operator's budget input is Racik's own food/ingredient budget, not
+    # an all-inclusive program pagu — nothing held back by default. See
+    # MBGConfig.ingredient_budget_share's docstring.
+    assert MBG.ingredient_budget_idr == pytest.approx(10_000.0)
 
 
 # ---------------------------------------------------------------- engine

@@ -50,14 +50,7 @@ export const api = {
   /** Full ingredient list, steps and gram provenance for one dish. */
   dish: (dishId) => request('GET', `/api/dish/${dishId}`),
 
-  /** The printable compliance + procurement report — returns raw HTML, not JSON. */
-  report: async (body) => {
-    const res = await fetch(BASE + '/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`report request failed (${res.status})`);
-    return res.text();
-  },
+  /** Short English glosses for a batch of Indonesian dish names — cached and
+   * batched server-side, so calling this again with the same names is free. */
+  translateDishNames: (names) => request('POST', '/api/translate', { names }),
 };

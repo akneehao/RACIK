@@ -107,11 +107,14 @@ def test_gizi_falls_back_when_llm_errors():
 
 # ---------------------------------------------------------------- Agen Biaya
 
-def test_biaya_rule_based_uses_bgn_default_split():
+def test_biaya_rule_based_uses_full_operator_budget():
     advice = agent_biaya(_Unconfigured(), budget_per_portion_idr=10_000,
                          portions=100, province="Jawa Tengah", lang="id")
     assert advice.source == "rule-based"
-    assert advice.params["ingredient_budget_share"] == pytest.approx(0.70)
+    # The operator's budget input is Racik's own food/ingredient budget, not
+    # an all-inclusive program pagu, so none of it is held back by default —
+    # see MBGConfig.ingredient_budget_share's docstring.
+    assert advice.params["ingredient_budget_share"] == pytest.approx(1.0)
     assert advice.params["regional_cost_index"] == pytest.approx(1.0)
 
 
@@ -124,7 +127,7 @@ def test_biaya_llm_path_clamps_out_of_range_values():
     advice = agent_biaya(_Scripted(reply), budget_per_portion_idr=8000,
                          portions=50, province="Bali", lang="en")
     assert advice.source == "llm"
-    assert advice.params["ingredient_budget_share"] <= 0.9
+    assert advice.params["ingredient_budget_share"] <= 1.0
     assert advice.params["regional_cost_index"] >= 0.7
 
 
