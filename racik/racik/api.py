@@ -18,6 +18,7 @@ from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
                   SCHOOL_STAGES, STAGE_LABELS, stage_band)
 from .config import (MBG, PROJECT_DIR, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS,
                      UI_DIR, MBGConfig)
+from .history import PlanHistory
 from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang, t, unit
 from .optimizer import MenuOptimizer, PlanRequest, PlanResult
 from .orchestrator import TOOL_SCHEMAS, RacikOrchestrator
@@ -26,6 +27,7 @@ from .report import build_report, plan_notes
 from .bedrock import make_client
 from .sealion import SeaLionClient
 from .store import RacikStore
+from .substitution import SubstitutionAgent
 from .translate import DishTranslator
 
 app = FastAPI(title="Racik", version="0.1.0",
@@ -48,6 +50,16 @@ def _optimizer() -> MenuOptimizer:
     return MenuOptimizer(_store().load_dishes())
 
 
+@lru_cache(maxsize=1)
+def _history() -> PlanHistory:
+    return PlanHistory()
+
+
+@lru_cache(maxsize=1)
+def _substitution_agent() -> SubstitutionAgent:
+    return SubstitutionAgent(_store(), make_client())
+
+
 # ---------------------------------------------------------------- schemas
 
 
@@ -66,8 +78,17 @@ class PlanBody(BaseModel):
     max_solve_seconds: float = Field(12.0, gt=0, le=60)
     random_seed: int = 0
     lang: str = DEFAULT_LANG
+    # User-entered nutrient targets, e.g. {"protein_g": 22}. A direct number
+    # the person typed, not a model guess — AKG stays the default for every
+    # key left out. See optimizer.PlanRequest.target_overrides.
+    target_overrides: dict[str, float] = {}
+    # Confirmed leftover stock to use up this plan — [{"tkpi_code":...,
+    # "usable_within_days": int}]. The client fetches /api/pantry to show
+    # what's on record, lets the kitchen uncheck anything gone bad, and
+    # sends only the confirmed subset here — storage isn't trusted blindly.
+    pantry_items: list[dict] = []
 
-    def to_request(self) -> PlanRequest:
+    def to_request(self, recency_weights: Optional[dict] = None) -> PlanRequest:
         config = MBGConfig(
             budget_per_portion_idr=self.budget_per_portion_idr,
             ingredient_budget_share=self.ingredient_budget_share,
@@ -83,6 +104,9 @@ class PlanBody(BaseModel):
             enforce_micronutrients=self.enforce_micronutrients,
             max_solve_seconds=self.max_solve_seconds,
             random_seed=self.random_seed,
+            recency_weights=recency_weights or {},
+            target_overrides=self.target_overrides,
+            pantry_items=self.pantry_items,
         )
 
 
@@ -132,13 +156,89 @@ def meta() -> dict:
     }
 
 
+def _solve(body: PlanBody):
+    """The one place every endpoint gets a PlanRequest from a PlanBody —
+    so /api/plan, /api/procurement and /api/report all solve with the
+    identical recency weighting, not just the same body. Before this,
+    only /api/plan fetched recency_weights; the other two solved with an
+    empty {}, meaning the shopping list or printed report could silently
+    reflect a different menu than the one actually on screen.
+    """
+    weights = _history().recency_weights(body.province, body.stage)
+    return _optimizer().solve(body.to_request(recency_weights=weights))
+
+
 @app.post("/api/plan")
 def plan(body: PlanBody) -> dict:
-    result = _optimizer().solve(body.to_request())
+    history = _history()
+    result = _solve(body)
     if not result.feasible:
         raise HTTPException(
             422, f"no menu could be built (solver status: {result.status})")
+    served = [dish.dish_id for day in result.days for dish in day.selected]
+    history.record(body.province, body.stage, served)
     return _serialise(result, norm_lang(body.lang))
+
+
+class RateBody(BaseModel):
+    dish_id: int
+    rating: float = Field(..., ge=1, le=5)
+    province: str = ""
+    stage: str = "sd"
+
+
+@app.post("/api/rate")
+def rate(body: RateBody) -> dict:
+    """Fold a kitchen's end-of-day rating into a dish's running score.
+
+    Feeds directly into the next solve's recency weighting (history.py):
+    a well-rated dish eases back into rotation sooner, a poorly-rated one
+    is pushed away harder — replacing a flat "never repeat" rule with one
+    that responds to whether the kids actually liked it.
+    """
+    mean = _history().rate(body.province, body.stage, body.dish_id, body.rating)
+    return {"dish_id": body.dish_id, "mean_rating": round(mean, 2)}
+
+
+class PantryReportBody(BaseModel):
+    province: str = ""
+    stage: str = "sd"
+    tkpi_code: str
+    ingredient_name: str
+    remaining_g: float = Field(..., ge=0)
+    usable_within_days: Optional[int] = Field(None, ge=1, le=14)
+
+
+@app.get("/api/pantry")
+def pantry(province: str = "", stage: str = "sd") -> dict:
+    """Current leftover stock for this scope — what the setup screen shows
+    before generating a plan, so a kitchen doesn't have to re-enter what
+    it's already reported."""
+    return {"items": _history().pantry_items(province, stage)}
+
+
+@app.post("/api/pantry/report")
+def pantry_report(body: PantryReportBody) -> dict:
+    """Record (or update) how much of an ingredient is left over, and for
+    how many of the next plan's days it's still good to use.
+
+    Feeds optimizer.py's pantry bonus (the mirror of the recency penalty):
+    a dish using this ingredient gets nudged toward selection, but only for
+    days within usable_within_days — after that it fades out like anything
+    else, same as a dish's recency avoidance fades back to zero.
+    """
+    _history().report_leftover(
+        body.province, body.stage, body.tkpi_code, body.ingredient_name,
+        body.remaining_g, body.usable_within_days)
+    return {"ok": True}
+
+
+@app.post("/api/pantry/clear")
+def pantry_clear(province: str = "", stage: str = "sd",
+                 tkpi_code: str = "") -> dict:
+    """Remove one item — used it all, or it went bad before it could be."""
+    _history().clear_pantry_item(province, stage, tkpi_code)
+    return {"ok": True}
 
 
 @app.get("/api/dish/{dish_id}")
@@ -164,9 +264,30 @@ def dish(dish_id: int) -> dict:
     return payload
 
 
+class SubstituteBody(BaseModel):
+    dish_id: int
+    ingredient: str = Field(..., min_length=1, max_length=200)
+    lang: str = DEFAULT_LANG
+
+
+@app.post("/api/substitute")
+def substitute(body: SubstituteBody) -> dict:
+    """The Reviewer agent: what to do when one ingredient isn't available.
+
+    A different question than /api/plan — not a re-optimisation, a judgment
+    call over one ingredient in an already-chosen dish. See substitution.py.
+    """
+    try:
+        result = _substitution_agent().review(
+            body.dish_id, body.ingredient, lang=norm_lang(body.lang))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return result.to_dict()
+
+
 @app.post("/api/procurement")
 def procurement(body: PlanBody, day: Optional[int] = None) -> dict:
-    result = _optimizer().solve(body.to_request())
+    result = _solve(body)
     if not result.feasible:
         raise HTTPException(422, "no menu could be built")
     lines = aggregate(result, _store(),
@@ -222,7 +343,7 @@ def report(body: ReportBody) -> HTMLResponse:
     compliance, every relaxed floor, the shopping list, and the methodology
     caveats. Prints to PDF from any browser.
     """
-    result = _optimizer().solve(body.to_request())
+    result = _solve(body)
     if not result.feasible:
         raise HTTPException(422, "no menu could be built")
     lines = aggregate(result, _store())
@@ -246,7 +367,8 @@ def _translator() -> DishTranslator:
 
 @lru_cache(maxsize=1)
 def _orchestrator() -> RacikOrchestrator:
-    return RacikOrchestrator(_store(), _optimizer(), make_client())
+    return RacikOrchestrator(_store(), _optimizer(), make_client(),
+                             history=_history())
 
 
 class AskBody(BaseModel):
@@ -297,6 +419,7 @@ def _serialise(result: PlanResult, lang: str = DEFAULT_LANG) -> dict:
             slots[slot] = None if dish_ is None else {
                 **dish_.to_dict(),
                 "main_food": dish_.main_food_name,
+                "main_food_code": dish_.main_food_code,
                 "cost_total_idr": round(dish_.cost_per_portion_idr * portions),
                 "steps": [s.strip() for s in (dish_.steps or "").split(".")
                           if s.strip()][:8],

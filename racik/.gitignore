@@ -5,6 +5,10 @@ data/racik.db
 # SEA-LION translation cache — regenerated on demand, per-deployment
 data/dish_translations.json
 
+# Runtime kitchen memory (history.py: served dishes, ratings, pantry) and
+# saved custom recipes (recipes.py) — per-deployment state, not source.
+data/history.db
+
 # Local secrets
 .env
 

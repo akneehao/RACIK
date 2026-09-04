@@ -5,6 +5,7 @@ rapidfuzz>=3.6
 pandas>=2.0
 openpyxl>=3.1
 pytest>=8.0
+httpx2>=2.0     # starlette.testclient's transport as of starlette>=1.0
 
 # Optional: only for the Amazon Bedrock provider
 # boto3>=1.34

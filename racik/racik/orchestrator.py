@@ -26,6 +26,7 @@ from typing import Any, Callable, Optional
 
 from .akg import BINDING_NUTRIENTS, NUTRIENT_META, SCHOOL_STAGES, STAGE_LABELS, stage_band
 from .config import MBG, SLOTS, MBGConfig
+from .history import PlanHistory
 from .i18n import DEFAULT_LANG, LANG_NAMES, norm_lang, t
 from .optimizer import MenuOptimizer, PlanRequest, PlanResult
 from .procurement import aggregate, totals
@@ -263,6 +264,10 @@ class OrchestratorResult:
     answer: str
     trace: list[ToolInvocation] = field(default_factory=list)
     plan: Optional[dict] = None          # last plan payload, for the UI to render
+    resolved_request: Optional[dict] = None  # exact params plan_menu was called
+                                          # with — lets the UI re-fetch the full
+                                          # /api/plan render for the same request
+                                          # the agent actually reasoned about
     model: str = ""
     mode: str = "sealion"                # "sealion" | "fallback"
     steps: int = 0
@@ -274,7 +279,8 @@ class OrchestratorResult:
             "answer": self.answer, "model": self.model, "mode": self.mode,
             "steps": self.steps, "stopped_because": self.stopped_because,
             "trace": [t.to_dict() for t in self.trace],
-            "plan": self.plan, "usage": self.usage,
+            "plan": self.plan, "resolved_request": self.resolved_request,
+            "usage": self.usage,
         }
 
 
@@ -286,13 +292,16 @@ class RacikOrchestrator:
 
     def __init__(self, store: RacikStore, optimizer: MenuOptimizer,
                  client: Optional[SeaLionClient] = None,
-                 max_steps: int = MAX_STEPS):
+                 max_steps: int = MAX_STEPS,
+                 history: Optional["PlanHistory"] = None):
         self.store = store
         self.optimizer = optimizer
         self.client = client or SeaLionClient()
         self.max_steps = max_steps
+        self.history = history
         self._plan_cache: dict[str, PlanResult] = {}
         self._last_plan_payload: Optional[dict] = None
+        self._last_resolved_request: Optional[dict] = None
         self._translator = None
         self._provinces = [p for p, _, _ in store.provinces()]
         self.tools: dict[str, Callable[..., dict]] = {
@@ -375,6 +384,7 @@ class RacikOrchestrator:
 
         return OrchestratorResult(
             answer=answer, trace=trace, plan=self._last_plan_payload,
+            resolved_request=self._last_resolved_request,
             model=self.client.model, mode="sealion", steps=step,
             stopped_because=stopped, usage=usage_total,
         )
@@ -551,12 +561,22 @@ class RacikOrchestrator:
                                           else MBG.ingredient_budget_share),
         )
         island = self.store.island_of(province) if province else ""
+        weights = (self.history.recency_weights(province, stage)
+                  if self.history else {})
         request = PlanRequest(
             days=days, stage=stage, portions=portions, province=province,
             island=island, config=config,
             exclude_terms=[t for t in (exclude_terms or []) if str(t).strip()],
             max_solve_seconds=10.0,
+            recency_weights=weights,
         )
+        self._last_resolved_request = {
+            "days": days, "stage": stage, "portions": portions,
+            "province": province, "island": island,
+            "budget_per_portion_idr": config.budget_per_portion_idr,
+            "ingredient_budget_share": config.ingredient_budget_share,
+            "exclude_terms": request.exclude_terms,
+        }
         key = json.dumps({
             "d": days, "s": stage, "p": portions, "prov": province,
             "b": config.budget_per_portion_idr,
@@ -593,7 +613,9 @@ class RacikOrchestrator:
                                     time.monotonic() - started))
         return OrchestratorResult(
             answer=_render_plan_text(payload, params, lang),
-            trace=trace, plan=payload, model="rule-based fallback",
+            trace=trace, plan=payload,
+            resolved_request=self._last_resolved_request,
+            model="rule-based fallback",
             mode="fallback", steps=1,
             stopped_because="sea-lion unavailable",
         )
@@ -656,6 +678,8 @@ def _render_plan_text(payload: dict, params: dict,
         t(lang, "plan.header", days=len(payload["days"]),
           stage=payload["stage"], portions=params.get("portions", 100),
           province=province),
+        t(lang, "plan.method", candidates=summary["candidates"]),
+        "",
         t(lang, "plan.cost",
           cost=f"{summary['mean_cost_per_portion_idr']:,.0f}",
           budget=f"{summary['ingredient_budget_idr']:,.0f}",
@@ -669,7 +693,8 @@ def _render_plan_text(payload: dict, params: dict,
                        adequacy=f"{day['adequacy'] * 100:.0f}%"))
         lines.append("    " + " · ".join(v for v in day["dishes"].values() if v))
     if payload["relaxations"]:
-        lines += ["", t(lang, "plan.relax_header")]
+        lines += ["", t(lang, "plan.relax_summary",
+                        adequacy=f"{summary['mean_adequacy'] * 100:.0f}%")]
         for r in payload["relaxations"][:5]:
             lines.append(t(lang, "plan.relax_row", day=r["day"],
                            nutrient=r["nutrient"], short=r["short_by"],

@@ -220,6 +220,12 @@
             <div class="chips" id="allergyChips"></div>
           </div>
 
+          <div id="pantryBox" class="hidden" style="margin-top:14px">
+            <label class="fld" data-i18n="f.pantry"></label>
+            <p class="hint" style="margin-top:0" data-i18n="f.pantryHint"></p>
+            <div id="pantryList" style="display:flex;flex-direction:column;gap:7px"></div>
+          </div>
+
           <div style="margin-top:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
             <button class="btn" id="go" data-i18n="btn.go"></button>
             <span class="hint" style="margin:0" data-i18n="hint.go"></span>
@@ -276,6 +282,12 @@
       </div>
     </div>
 
+    <div class="notice hidden" id="planLoading" style="margin-bottom:14px;display:flex;align-items:center;gap:8px">
+      <span class="spinner" style="border-top-color:var(--warn);border-color:rgba(185,118,30,.3)"></span>
+      <span data-i18n="loading.recalc"></span>
+    </div>
+    <div class="card pad hidden" id="agentPanel" style="margin-bottom:18px"></div>
+
     <div class="metrics" id="metrics"></div>
     <div id="notes"></div>
 
@@ -331,6 +343,10 @@ const STRINGS = {
     "f.share": "Porsi anggaran bahan baku",
     "f.exclude": "Alergi / pantangan (pisahkan dengan koma)",
     "f.excludePh": "mis. udang, kacang tanah, telur",
+    "f.pantry": "Stok sisa minggu lalu",
+    "f.pantryHint": "Dilaporkan dari tab Procurement. Batalkan centang jika sudah habis atau tidak layak pakai lagi.",
+    "f.pantryDays": "layak sampai hari ke-",
+    "f.pantryRemove": "Hapus — sudah habis/tidak layak lagi",
     "opt.days": "{n} hari",
     "opt.daysWeek": "5 hari (Senin–Jumat)",
     "opt.share70": "70% — bahan baku (Rp7.000)",
@@ -339,7 +355,9 @@ const STRINGS = {
     "opt.noProvince": "Tanpa preferensi (nasional)",
     "btn.go": "Susun menu",
     "btn.going": "Menghitung…",
+    "loading.recalc": "Menyusun ulang menu — solver berjalan sampai ±25 detik, hasil sebelumnya masih tampil sampai selesai.",
     "hint.go": "Optimasi berjalan sampai ±12 detik.",
+    "agent.title": "Cara Racik menyusun menu ini",
     "ask.title": "Tanya Racik",
     "ask.desc": "Tulis kebutuhan Anda dalam bahasa Indonesia. Orkestrator memanggil mesin perhitungan — setiap angka berasal dari alat, bukan dari model.",
     "ask.ph": "mis. Menu 5 hari untuk SMP di Jawa Tengah, 150 porsi, tanpa udang. Apakah pagu Rp10.000 cukup?",
@@ -348,6 +366,10 @@ const STRINGS = {
     "btn.example": "Contoh",
     "basis.title": "Dasar perhitungan",
     "basis.targets": "Target per satu kali makan — {stage}",
+    "targets.edit": "Sesuaikan target gizi",
+    "targets.editing": "Target untuk {stage} — AKG sebagai bawaan, ubah jika perlu",
+    "targets.reset": "Kembali ke AKG",
+    "targets.done": "Selesai",
     "basis.headline": "Satu kali makan MBG = ±⅓ AKG harian.",
     "basis.li1": "AKG 2019 (Permenkes 28/2019) — makro terverifikasi.",
     "basis.li2": "Mikronutrien ditampilkan sebagai informasi, belum jadi batasan.",
@@ -380,9 +402,15 @@ const STRINGS = {
     "relax.short": "Kurang",
     "relax.target": "Target",
     "relax.gap": "Selisih",
+    "relax.summary": "Menu ini memenuhi {pct}% target gizi rata-rata. {n} dari {days} hari sedikit di bawah target — yang paling besar: {worst}.",
+    "relax.none": "Menu ini memenuhi seluruh batas bawah AKG tanpa pelonggaran.",
+    "relax.show": "Lihat rincian",
+    "relax.hide": "Sembunyikan rincian",
     "notes.title": "Catatan metodologi & keterbatasan",
     "tray.empty": "Tidak terisi",
     "tray.protein": "g protein",
+    "tray.pantryBadge": "stok",
+    "tray.pantryHit": "Dipilih untuk memakai stok sisa yang Anda konfirmasi",
     "compliance.sub": "{day} · target {stage} · ±⅓ AKG harian",
     "compliance.advisoryTitle": "AKG mikronutrien belum diverifikasi terhadap PDF Permenkes 28/2019",
     "compliance.footnote": "Baris bertanda INFO tidak dijadikan batasan optimasi — nilai mikronutrien AKG 2019 masih berbeda antar sumber sekunder dan menunggu verifikasi terhadap dokumen Permenkes 28/2019 asli.",
@@ -400,6 +428,16 @@ const STRINGS = {
     "dish.thScaled": "Skala",
     "dish.thCost": "Biaya",
     "dish.thBasis": "Dasar",
+    "dish.notAvail": "Tidak tersedia?",
+    "rate.label": "Nilai:",
+    "rate.saved": "Tersimpan · rata-rata {avg}★",
+    "rate.failed": "Gagal menyimpan",
+    "sub.calling": "Memeriksa ketersediaan…",
+    "sub.core": "Bahan utama",
+    "sub.flexible": "Bahan pelengkap",
+    "sub.fromModel": "dinilai SEA-LION",
+    "sub.fromRules": "dinilai aturan",
+    "sub.useInstead": "Ganti dengan",
     "dish.noMatch": "tidak dipadankan ke TKPI — tanpa kontribusi gizi",
     "dish.proxy": "pengganti",
     "dish.steps": "Langkah",
@@ -410,6 +448,12 @@ const STRINGS = {
     "proc.thWeight": "Berat kotor",
     "proc.thCost": "Biaya",
     "proc.thUsed": "Dipakai pada",
+    "proc.leftover": "Sisa?",
+    "proc.leftoverLabel": "Sisa:",
+    "proc.leftoverDays": "bisa dipakai sampai (hari ke-)",
+    "proc.leftoverSave": "Simpan",
+    "proc.leftoverSaved": "Tersimpan — akan diprioritaskan minggu depan",
+    "proc.leftoverInvalid": "Masukkan jumlah yang valid",
     "proc.failed": "Gagal memuat: {error}",
     "csv.name": "Bahan", "csv.weight": "Berat kotor (kg)", "csv.cost": "Biaya (Rp)",
     "csv.matched": "Dipadankan TKPI", "csv.used": "Dipakai pada",
@@ -421,6 +465,9 @@ const STRINGS = {
     "orch.unavailable": "status tidak tersedia",
     "ask.calling": "Memanggil mesin perhitungan…",
     "ask.steps": "{n} langkah · {reason}",
+    "reason.completed": "selesai",
+    "reason.basicMode": "mode dasar tanpa SEA-LION — hasil tetap dari mesin perhitungan yang sama",
+    "reason.stepCap": "berhenti setelah batas langkah tercapai",
     "ask.trace": "Jejak alat ({n}) — sumber setiap angka",
     "ask.planned": "RENCANA YANG DIHITUNG",
     "ask.failed": "Gagal: {error}",
@@ -448,6 +495,10 @@ const STRINGS = {
     "f.share": "Share available for ingredients",
     "f.exclude": "Allergies / exclusions (comma separated)",
     "f.excludePh": "e.g. shrimp, peanut, egg",
+    "f.pantry": "Leftover stock from last week",
+    "f.pantryHint": "Reported from the Procurement tab. Uncheck anything that's gone or no longer usable.",
+    "f.pantryDays": "usable through day",
+    "f.pantryRemove": "Remove — used up / no longer usable",
     "opt.days": "{n} days",
     "opt.daysWeek": "5 days (Mon–Fri)",
     "opt.share70": "70% — ingredients (Rp7,000)",
@@ -456,7 +507,9 @@ const STRINGS = {
     "opt.noProvince": "No preference (national)",
     "btn.go": "Build menu",
     "btn.going": "Solving…",
+    "loading.recalc": "Rebuilding the menu — the solver runs up to ~25s, the previous result stays visible until it's done.",
     "hint.go": "Optimisation runs for up to ~12 seconds.",
+    "agent.title": "How Racik built this menu",
     "ask.title": "Ask Racik",
     "ask.desc": "Describe what you need in plain language. The orchestrator calls the calculation engine — every number comes from a tool, never from the model.",
     "ask.ph": "e.g. A 5-day menu for SMP in Central Java, 150 portions, no shrimp. Is Rp10,000 enough?",
@@ -465,6 +518,10 @@ const STRINGS = {
     "btn.example": "Example",
     "basis.title": "Basis of calculation",
     "basis.targets": "Per-meal target — {stage}",
+    "targets.edit": "Customize nutrition targets",
+    "targets.editing": "Targets for {stage} — AKG by default, edit if needed",
+    "targets.reset": "Reset to AKG",
+    "targets.done": "Done",
     "basis.headline": "One MBG meal ≈ ⅓ of daily AKG.",
     "basis.li1": "AKG 2019 (Permenkes 28/2019) — macronutrients verified.",
     "basis.li2": "Micronutrients shown for information, not yet enforced.",
@@ -497,9 +554,15 @@ const STRINGS = {
     "relax.short": "Short by",
     "relax.target": "Target",
     "relax.gap": "Gap",
+    "relax.summary": "This menu meets {pct}% of nutrition targets on average. {n} of {days} days fall a little short — the largest: {worst}.",
+    "relax.none": "This menu meets every AKG floor with no relaxation.",
+    "relax.show": "Show details",
+    "relax.hide": "Hide details",
     "notes.title": "Methodology & limitations",
     "tray.empty": "Not filled",
     "tray.protein": "g protein",
+    "tray.pantryBadge": "stock",
+    "tray.pantryHit": "Selected to use up the leftover stock you confirmed",
     "compliance.sub": "{day} · target {stage} · ⅓ of daily AKG",
     "compliance.advisoryTitle": "AKG micronutrient values not yet verified against the Permenkes 28/2019 PDF",
     "compliance.footnote": "Rows marked INFO are not used as optimisation constraints — AKG 2019 micronutrient values still disagree across secondary sources and await verification against the original Permenkes 28/2019 document.",
@@ -517,6 +580,16 @@ const STRINGS = {
     "dish.thScaled": "Scaled",
     "dish.thCost": "Cost",
     "dish.thBasis": "Basis",
+    "dish.notAvail": "Not available?",
+    "rate.label": "Rate:",
+    "rate.saved": "Saved · avg {avg}★",
+    "rate.failed": "Failed to save",
+    "sub.calling": "Checking availability…",
+    "sub.core": "Core ingredient",
+    "sub.flexible": "Flexible ingredient",
+    "sub.fromModel": "reviewed by SEA-LION",
+    "sub.fromRules": "reviewed by rules",
+    "sub.useInstead": "Use instead",
     "dish.noMatch": "not matched to TKPI — contributes no nutrition",
     "dish.proxy": "proxy",
     "dish.steps": "Steps",
@@ -527,6 +600,12 @@ const STRINGS = {
     "proc.thWeight": "Gross weight",
     "proc.thCost": "Cost",
     "proc.thUsed": "Used in",
+    "proc.leftover": "Leftover?",
+    "proc.leftoverLabel": "Remaining:",
+    "proc.leftoverDays": "usable through day",
+    "proc.leftoverSave": "Save",
+    "proc.leftoverSaved": "Saved — will be prioritised next week",
+    "proc.leftoverInvalid": "Enter a valid amount",
     "proc.failed": "Failed to load: {error}",
     "csv.name": "Ingredient", "csv.weight": "Gross weight (kg)", "csv.cost": "Cost (Rp)",
     "csv.matched": "Matched to TKPI", "csv.used": "Used in",
@@ -538,6 +617,9 @@ const STRINGS = {
     "orch.unavailable": "status unavailable",
     "ask.calling": "Calling the calculation engine…",
     "ask.steps": "{n} steps · {reason}",
+    "reason.completed": "done",
+    "reason.basicMode": "basic mode without SEA-LION — the numbers still come from the same calculation engine",
+    "reason.stepCap": "stopped after reaching the step limit",
     "ask.trace": "Tool trace ({n}) — the source of every number",
     "ask.planned": "COMPUTED PLAN",
     "ask.failed": "Failed: {error}",
@@ -595,6 +677,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 let META = null, PLAN = null, ACTIVE_DAY = 0, PROC = null, LAST_BODY = null, ORCH = null;
+let OVERRIDES = {};   // user-entered nutrient target overrides, {energy_kcal: 700, ...}
 
 function applyI18n(){
   document.documentElement.lang = LANG;
@@ -671,23 +754,116 @@ async function boot(){
     el("allergyChips").appendChild(b);
   });
 
-  el("stage").onchange = renderTargets;
+  el("stage").onchange = () => { OVERRIDES = {}; renderTargets(); loadPantry(); };
+  el("province").onchange = loadPantry;
   renderTargets();
   loadOrchestratorStatus();
+  loadPantry();
 }
+
+/** What's on record from a previous week's "sisa?" report (Procurement
+ * tab) — shown before generating so nobody has to re-type what they
+ * already told the system. Feeds PlanRequest.pantry_items (optimizer's
+ * pantry bonus) via whichever rows stay checked. */
+async function loadPantry(){
+  const box = el("pantryBox"), list = el("pantryList");
+  try{
+    const res = await fetch(API + `/api/pantry?province=${encodeURIComponent(el("province").value)}&stage=${el("stage").value}`);
+    const data = await res.json();
+    if(!data.items || !data.items.length){ box.classList.add("hidden"); list.innerHTML = ""; return; }
+    box.classList.remove("hidden");
+    list.innerHTML = data.items.map((it, i) => `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--paper-dim);
+        border-radius:8px;padding:8px 10px;font-size:13px">
+        <input type="checkbox" class="pantry-check" id="pantry-${i}" data-code="${esc(it.tkpi_code)}" checked>
+        <label for="pantry-${i}" style="flex:1;min-width:120px">${esc(it.ingredient_name)}
+          <span class="mono" style="color:var(--ink-soft);font-size:11.5px">${(it.remaining_g/1000).toFixed(2)} kg</span></label>
+        <span style="font-size:11.5px;color:var(--ink-soft)">${esc(t("f.pantryDays"))}</span>
+        <input type="number" class="pantry-days" min="1" max="14"
+          value="${it.usable_within_days || 3}" style="width:56px;padding:5px 7px;font-size:12.5px">
+        <button type="button" class="pantry-remove" data-code="${esc(it.tkpi_code)}"
+          title="${esc(t("f.pantryRemove"))}"
+          style="border:none;background:transparent;color:var(--ink-soft);cursor:pointer;
+                 font-size:15px;line-height:1;padding:2px 4px">×</button>
+      </div>`).join("");
+    // Unchecking only excludes an item from *this* plan (see collectPantryItems);
+    // removing it here is the lasting action — it won't reappear on reload,
+    // unlike an unchecked-but-still-stored row would.
+    list.querySelectorAll(".pantry-remove").forEach(btn =>
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try{
+          await fetch(API + `/api/pantry/clear?province=${encodeURIComponent(el("province").value)}` +
+            `&stage=${el("stage").value}&tkpi_code=${encodeURIComponent(btn.dataset.code)}`,
+            { method: "POST" });
+          loadPantry();
+        }catch(err){ btn.disabled = false; }
+      });
+  }catch(err){ box.classList.add("hidden"); }
+}
+
+/** The confirmed subset — unchecked rows (spoiled, already gone) are left
+ * out, same as the design we walked through: storage isn't trusted
+ * blindly, the kitchen's confirmation at generate-time is. */
+function collectPantryItems(){
+  return [...el("pantryList").querySelectorAll(".pantry-check:checked")].map(cb => {
+    const row = cb.closest("div");
+    return {
+      tkpi_code: cb.dataset.code,
+      usable_within_days: +row.querySelector(".pantry-days").value || 3
+    };
+  });
+}
+
+const TARGET_ROWS = [["energy_kcal","u.kcal"],["protein_g","u.g"],["fat_g","u.g"],
+                     ["carb_g","u.g"],["fibre_g","u.g"]];
+let EDIT_TARGETS = false;
 
 function renderTargets(){
   const s = META.stages.find(x => x.key === el("stage").value);
-  const rows = [["energy_kcal","u.kcal"],["protein_g","u.g"],["fat_g","u.g"],
-                ["carb_g","u.g"],["fibre_g","u.g"]];
+  if(!EDIT_TARGETS){
+    el("stageTargets").innerHTML =
+      `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:9px">
+         ${esc(t("basis.targets", {stage: s.label}))}</div>` +
+      TARGET_ROWS.map(([k,u]) =>
+        `<div style="display:flex;justify-content:space-between;padding:6px 0;
+          border-bottom:1px solid var(--paper-dim);font-size:13.5px">
+          <span>${esc(t("n." + k))}</span>
+          <span class="mono" style="font-weight:600">${s.targets[k]} ${t(u)}</span></div>`).join("") +
+      `<button class="btn ghost" id="editTargetsBtn" style="margin-top:11px;width:100%">
+         ${esc(t("targets.edit"))}</button>`;
+    el("editTargetsBtn").onclick = () => { EDIT_TARGETS = true; renderTargets(); };
+    return;
+  }
+  // A direct number the user types in a field, defaulted from AKG — not a
+  // model guess. Flows straight to PlanRequest.target_overrides; nothing
+  // here is interpreted by the LLM. See optimizer.py's docstring on why.
   el("stageTargets").innerHTML =
     `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:9px">
-       ${esc(t("basis.targets", {stage: s.label}))}</div>` +
-    rows.map(([k,u]) =>
-      `<div style="display:flex;justify-content:space-between;padding:6px 0;
-        border-bottom:1px solid var(--paper-dim);font-size:13.5px">
-        <span>${esc(t("n." + k))}</span>
-        <span class="mono" style="font-weight:600">${s.targets[k]} ${t(u)}</span></div>`).join("");
+       ${esc(t("targets.editing", {stage: s.label}))}</div>` +
+    TARGET_ROWS.map(([k,u]) => {
+      const current = OVERRIDES[k] ?? s.targets[k];
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;
+        padding:6px 0;border-bottom:1px solid var(--paper-dim)">
+        <span style="font-size:13.5px">${esc(t("n." + k))}</span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <input type="number" class="target-override" data-key="${k}" value="${current}"
+            step="any" min="0" style="width:88px;padding:6px 8px;font-size:13px">
+          <span class="mono" style="font-size:11.5px;color:var(--ink-soft)">${t(u)}</span>
+        </span></div>`;
+    }).join("") +
+    `<div style="display:flex;gap:8px;margin-top:11px">
+       <button class="btn ghost" id="resetTargetsBtn" style="flex:1">${esc(t("targets.reset"))}</button>
+       <button class="btn ghost" id="doneTargetsBtn" style="flex:1">${esc(t("targets.done"))}</button>
+     </div>`;
+  el("stageTargets").querySelectorAll(".target-override").forEach(inp =>
+    inp.onchange = () => {
+      const v = parseFloat(inp.value);
+      if(Number.isFinite(v) && v > 0) OVERRIDES[inp.dataset.key] = v;
+      else delete OVERRIDES[inp.dataset.key];
+    });
+  el("resetTargetsBtn").onclick = () => { OVERRIDES = {}; renderTargets(); };
+  el("doneTargetsBtn").onclick = () => { EDIT_TARGETS = false; renderTargets(); };
 }
 
 function collectBody(){
@@ -706,18 +882,121 @@ function collectBody(){
     exclude_terms: [...new Set(terms)],
     max_solve_seconds: 12,
     random_seed: 0,
-    lang: LANG
+    lang: LANG,
+    target_overrides: {...OVERRIDES},
+    pantry_items: collectPantryItems()
   };
 }
 
 /* ---------------- generate ---------------- */
-async function generate(seed){
-  const btn = el("go");
+
+/** Turn the form into one real natural-language request, so the primary
+ * "Build menu" button is a genuine agent call — not a shortcut around it —
+ * the same /api/ask path "Tanya Racik" uses, parsed by the same orchestrator. */
+function buildAskSentence(body){
+  const stageObj = (META.stages || []).find(s => s.key === body.stage);
+  const stageLabel = stageObj ? stageObj.label : body.stage;
+  if(LANG === "id"){
+    let s = `Buatkan menu ${body.days} hari untuk ${stageLabel}` +
+      (body.province ? ` di ${body.province}` : "") +
+      `, ${body.portions} porsi, pagu Rp${body.budget_per_portion_idr}.`;
+    if(body.exclude_terms.length) s += ` Hindari ${body.exclude_terms.join(", ")}.`;
+    return s;
+  }
+  let s = `Plan a ${body.days}-day menu for ${stageLabel}` +
+    (body.province ? ` in ${body.province}` : "") +
+    `, ${body.portions} portions, budget Rp${body.budget_per_portion_idr}.`;
+  if(body.exclude_terms.length) s += ` Avoid ${body.exclude_terms.join(", ")}.`;
+  return s;
+}
+
+/** The backend's `stopped_because` values are internal engineering states
+ * ("sea-lion unavailable", "hit step cap (6)") — meaningful for debugging,
+ * meaningless (and alarming — sounds like an outage) to a kitchen operator.
+ * Translate the ones we know; anything unrecognised passes through rather
+ * than hiding a genuinely new failure mode. */
+function friendlyReason(reason){
+  if(reason === "completed") return t("reason.completed");
+  if(reason === "sea-lion unavailable") return t("reason.basicMode");
+  if(/^hit step cap/.test(reason || "")) return t("reason.stepCap");
+  return reason;
+}
+
+function renderAgentPanel(askData){
+  const panel = el("agentPanel");
+  if(!askData){ panel.classList.add("hidden"); return; }
+  const modeTag = askData.mode === "sealion"
+    ? `<span class="qbadge high">${esc(askData.model.split("/").pop())}</span>`
+    : `<span class="qbadge medium">${esc(t("orch.basic"))}</span>`;
+  const tools = askData.trace.length
+    ? `<details style="margin-top:10px">
+         <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600">
+           ${esc(t("ask.trace", {n: askData.trace.length}))}</summary>
+         <div style="margin-top:8px">${askData.trace.map(x => `
+           <div style="border-left:2.5px solid var(--line);padding:5px 0 5px 10px;margin-bottom:7px">
+             <div class="mono" style="font-size:11.5px;font-weight:700">${esc(x.tool)}
+               <span style="font-weight:400;color:var(--ink-soft)">${x.seconds}s</span></div>
+             <div class="mono" style="font-size:10.5px;color:var(--ink-soft);word-break:break-all">
+               ${esc(JSON.stringify(x.arguments))}</div>
+           </div>`).join("")}</div>
+       </details>` : "";
+  panel.classList.remove("hidden");
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <h3 style="font-size:15.5px">${esc(t("agent.title"))}</h3>
+      <div style="display:flex;align-items:center;gap:8px">${modeTag}
+        <span style="font-size:11.5px;color:var(--ink-soft)">${esc(t("ask.steps", {n: askData.steps, reason: friendlyReason(askData.stopped_because)}))}</span></div>
+    </div>
+    <div style="font-size:13px;line-height:1.6;color:var(--ink-soft);white-space:pre-wrap;margin-top:8px">
+      ${esc(askData.answer)}</div>
+    ${tools}`;
+}
+
+async function generate(seed, triggerBtn){
+  // Whichever button was actually clicked needs its own feedback — a solve
+  // takes ~12-25s (agent call, then the real solve), and when reshuffle is
+  // clicked #result is already showing and #go is off-screen, so spinning
+  // #go alone is invisible: the page looks frozen for the entire wait.
+  const btn = triggerBtn || el("go");
+  const otherBtn = btn === el("go") ? el("reshuffleBtn") : el("go");
+  const original = btn.textContent;
   const body = LAST_BODY = collectBody();
   if(seed !== undefined) body.random_seed = seed;
   btn.disabled = true;
+  if(otherBtn) otherBtn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span>${esc(t("btn.going"))}`;
+  const loading = el("planLoading");
+  if(loading) loading.classList.remove("hidden");
   try{
+    // Primary path goes through the agent first: a real natural-language
+    // request, parsed and routed by the orchestrator (same as "Tanya
+    // Racik"), not a bare form POST. Its answer and tool trace render in
+    // agentPanel below, so the planning step is visible, not skipped.
+    let askData = null;
+    try{
+      const askRes = await fetch(API + "/api/ask", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({question: buildAskSentence(body), lang: LANG})
+      });
+      if(askRes.ok) askData = await askRes.json();
+    }catch(err){ /* the agent call is a bonus, never blocks the real solve below */ }
+
+    // The agent resolved free text into exact solver parameters (province
+    // matched, stage matched, budget parsed). Re-solve with those exact
+    // params through /api/plan for the full rich payload the UI already
+    // knows how to render — this keeps tool results small (per orchestrator
+    // design) while the UI still gets recipes, images-worth of detail, etc.
+    if(askData && askData.resolved_request){
+      const r = askData.resolved_request;
+      Object.assign(body, {
+        days: r.days, stage: r.stage, portions: r.portions,
+        province: r.province, island: r.island,
+        budget_per_portion_idr: r.budget_per_portion_idr,
+        ingredient_budget_share: r.ingredient_budget_share,
+        exclude_terms: r.exclude_terms,
+      });
+    }
+
     const res = await fetch(API + "/api/plan", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)
@@ -727,13 +1006,16 @@ async function generate(seed){
     ACTIVE_DAY = 0;
     el("setup").classList.add("hidden");
     el("result").classList.remove("hidden");
+    renderAgentPanel(askData);
     renderPlan();
     window.scrollTo({top: 0, behavior: "smooth"});
     loadProcurement(body);
   }catch(err){
     alert(t("err.plan") + err.message);
   }finally{
-    btn.disabled = false; btn.textContent = t("btn.go");
+    btn.disabled = false; btn.textContent = original;
+    if(otherBtn) otherBtn.disabled = false;
+    if(loading) loading.classList.add("hidden");
   }
 }
 
@@ -773,11 +1055,23 @@ function renderPlan(){
       <div class="v">${s.relaxed_floors}</div>
       <div class="s">${esc(s.relaxed_floors ? t("m.relaxedSome") : t("m.relaxedNone"))}</div></div>`;
 
-  const relaxHtml = PLAN.relaxations.length ? `
+  // A first-time viewer should get one plain sentence before a data table —
+  // the table stays available (that transparency matters, see relax.desc),
+  // but collapsed behind a toggle rather than the first thing on the page.
+  const worst = PLAN.relaxations[0];
+  const relaxSummary = PLAN.relaxations.length ? `
     <div class="card pad" style="margin-bottom:14px">
-      <h3 style="font-size:16px">${esc(t("relax.title"))}</h3>
-      <p style="font-size:13px;color:var(--ink-soft);margin:5px 0 12px">${esc(t("relax.desc"))}</p>
-      <div class="scroll"><table>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <p style="font-size:13.5px;margin:0;line-height:1.55">
+          ${esc(t("relax.summary", {
+            pct: Math.round(s.mean_adequacy * 100),
+            n: new Set(PLAN.relaxations.map(r => r.day)).size,
+            days: PLAN.days.length,
+            worst: worst ? `${nutLabel(worst)} (${dayLabel(PLAN.days[worst.day])}, −${Math.round(worst.share*100)}%)` : ""
+          }))}</p>
+        <button class="btn ghost" id="relaxToggle" style="flex-shrink:0">${esc(t("relax.show"))}</button>
+      </div>
+      <div class="scroll hidden" id="relaxTable" style="margin-top:14px"><table>
         <thead><tr><th>${esc(t("relax.day"))}</th><th>${esc(t("relax.nutrient"))}</th>
           <th class="num">${esc(t("relax.short"))}</th><th class="num">${esc(t("relax.target"))}</th>
           <th class="num">${esc(t("relax.gap"))}</th></tr></thead>
@@ -788,11 +1082,20 @@ function renderPlan(){
           <td class="num">${r.target} ${esc(r.unit)}</td>
           <td class="num" style="color:var(--chili);font-weight:600">−${Math.round(r.share*100)}%</td>
         </tr>`).join("")}</tbody></table></div>
-    </div>` : "";
+    </div>` : `
+    <div class="card pad" style="margin-bottom:14px">
+      <p style="font-size:13.5px;margin:0">${esc(t("relax.none"))}</p>
+    </div>`;
 
-  el("notes").innerHTML = relaxHtml + (PLAN.notes.length
+  el("notes").innerHTML = relaxSummary + (PLAN.notes.length
     ? `<div class="notice"><strong>${esc(t("notes.title"))}</strong>
         <ul>${PLAN.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>` : "");
+  const relaxToggle = el("relaxToggle");
+  if(relaxToggle) relaxToggle.onclick = () => {
+    const tbl = el("relaxTable");
+    const showing = tbl.classList.toggle("hidden") === false;
+    relaxToggle.textContent = t(showing ? "relax.hide" : "relax.show");
+  };
 
   el("dayTabs").innerHTML = PLAN.days.map((d,i) => {
     const cls = d.adequacy >= .95 ? "" : d.adequacy >= .85 ? "warn" : "bad";
@@ -806,27 +1109,53 @@ function renderPlan(){
   renderDay(PLAN.days[ACTIVE_DAY]);
 }
 
+/** True when this dish is the reason a confirmed pantry item's bonus
+ * existed for this day — the visible payoff for "will be prioritised next
+ * week" that otherwise has no on-screen confirmation it did anything. */
+function usesPantryStock(dish, dayIndex){
+  const items = (LAST_BODY && LAST_BODY.pantry_items) || [];
+  return items.some(it => it.tkpi_code === dish.main_food_code
+    && dayIndex < (it.usable_within_days || 0));
+}
+
 function renderDay(day){
   el("tray").innerHTML = Object.entries(day.slots).map(([slot, dish]) => {
     if(!dish) return `<div class="slot" style="opacity:.55;cursor:default">
       <div class="cat">${esc(slotLabel(slot))}</div><h4>${esc(t("tray.empty"))}</h4></div>`;
-    return `<button class="slot" data-id="${dish.dish_id}" data-slot="${slot}">
-      <div class="cat">${esc(slotLabel(slot))}
-        <span class="qbadge ${dish.quality_label}">${dish.quality_label}</span></div>
-      <h4>${esc(dish.name)}</h4>
-      <div style="font-size:12px;color:var(--ink-soft)">${esc(dish.main_food || "")}</div>
-      <div class="meta">
-        <span>${esc(dish.province)}</span>
-        <span class="mono">${rp(dish.cost_per_portion_idr)}</span>
+    const pantryHit = usesPantryStock(dish, day.index);
+    return `<div class="slot" style="cursor:default">
+      <button type="button" class="slot-main" data-id="${dish.dish_id}" data-slot="${slot}"
+        style="all:unset;cursor:pointer;display:flex;flex-direction:column;gap:9px;width:100%">
+        <div class="cat">${esc(slotLabel(slot))}
+          <span class="qbadge ${dish.quality_label}">${dish.quality_label}</span>
+          ${pantryHit ? `<span class="qbadge high" title="${esc(t("tray.pantryHit"))}">${esc(t("tray.pantryBadge"))}</span>` : ""}</div>
+        <h4>${esc(dish.name)}</h4>
+        <div style="font-size:12px;color:var(--ink-soft)">${esc(dish.main_food || "")}</div>
+        <div class="meta">
+          <span>${esc(dish.province)}</span>
+          <span class="mono">${rp(dish.cost_per_portion_idr)}</span>
+        </div>
+        <div class="meta" style="border:0;padding-top:0">
+          <span class="mono">${Math.round(dish.per_portion.energy_kcal)} ${esc(t("u.kcal"))}</span>
+          <span class="mono">${dish.per_portion.protein_g.toFixed(1)} ${esc(t("tray.protein"))}</span>
+        </div>
+      </button>
+      <div class="slot-rate" data-id="${dish.dish_id}" style="display:flex;align-items:center;
+        gap:2px;padding-top:9px;margin-top:2px;border-top:1px dashed var(--line)">
+        <span style="font-size:10.5px;color:var(--ink-soft);margin-right:4px">${esc(t("rate.label"))}</span>
+        ${[1,2,3,4,5].map(n => `<span class="rate-star" data-n="${n}"
+          style="cursor:pointer;font-size:15px;line-height:1;color:var(--line)">★</span>`).join("")}
+        <span class="rate-result mono" style="font-size:10.5px;color:var(--ink-soft);margin-left:6px"></span>
       </div>
-      <div class="meta" style="border:0;padding-top:0">
-        <span class="mono">${Math.round(dish.per_portion.energy_kcal)} ${esc(t("u.kcal"))}</span>
-        <span class="mono">${dish.per_portion.protein_g.toFixed(1)} ${esc(t("tray.protein"))}</span>
-      </div>
-    </button>`;
+    </div>`;
   }).join("");
-  el("tray").querySelectorAll(".slot[data-id]").forEach(b =>
+  el("tray").querySelectorAll(".slot-main[data-id]").forEach(b =>
     b.onclick = () => openDish(+b.dataset.id, b.dataset.slot));
+  el("tray").querySelectorAll(".slot-rate").forEach(row => {
+    const dishId = +row.dataset.id;
+    row.querySelectorAll(".rate-star").forEach(star =>
+      star.onclick = () => rateDish(dishId, +star.dataset.n, row));
+  });
 
   el("complianceSub").textContent = t("compliance.sub",
     {day: dayLabel(day), stage: bandLabel()});
@@ -844,8 +1173,36 @@ function renderDay(day){
       ${esc(t("compliance.footnote"))}</div>`;
 }
 
+/** Ratings feed straight into the next solve's recency weighting
+ * (history.py): a dish rated well eases back into rotation sooner than an
+ * unrated one, a poorly-rated one is pushed away harder — not just "never
+ * repeat," but "repeat what's actually liked." */
+async function rateDish(dishId, n, row){
+  row.querySelectorAll(".rate-star").forEach((s, i) =>
+    s.style.color = i < n ? "var(--gold)" : "var(--line)");
+  const result = row.querySelector(".rate-result");
+  result.textContent = "…";
+  try{
+    const res = await fetch(API + "/api/rate", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        dish_id: dishId, rating: n,
+        province: LAST_BODY.province, stage: LAST_BODY.stage
+      })
+    });
+    if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const d = await res.json();
+    result.textContent = t("rate.saved", {avg: d.mean_rating});
+  }catch(err){
+    result.textContent = t("rate.failed");
+  }
+}
+
 /* ---------------- dish detail ---------------- */
+let CURRENT_DISH_ID = null;
+
 async function openDish(id, slot){
+  CURRENT_DISH_ID = id;
   const dish = await (await fetch(`${API}/api/dish/${id}`)).json();
   el("dlgSlot").textContent = slotLabel(slot) || dish.slot;
   el("dlgTitle").textContent = dish.name;
@@ -863,6 +1220,8 @@ async function openDish(id, slot){
       <td class="num">${(i.gross_g * scale / 1000).toFixed(2)} kg</td>
       <td class="num">${rp(i.cost_idr * scale)}</td>
       <td><span class="qbadge ${i.unquantified ? "medium" : "high"}">${esc(i.urt_confidence)}</span></td>
+      <td><button type="button" class="btn ghost sub-btn" data-ingredient="${esc(i.raw)}"
+        style="font-size:11px;padding:5px 9px;white-space:nowrap">${esc(t("dish.notAvail"))}</button></td>
     </tr>`).join("");
 
   el("dlgBody").innerHTML = `
@@ -884,14 +1243,54 @@ async function openDish(id, slot){
     <div class="scroll"><table>
       <thead><tr><th>${esc(t("dish.thIngredient"))}</th><th class="num">${esc(t("dish.thRecipe"))}</th>
         <th class="num">${esc(t("dish.thScaled"))}</th><th class="num">${esc(t("dish.thCost"))}</th>
-        <th>${esc(t("dish.thBasis"))}</th></tr></thead>
+        <th>${esc(t("dish.thBasis"))}</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
+    <div id="subResult"></div>
     ${dish.steps ? `<h4 style="margin:18px 0 4px;font-size:15px">${esc(t("dish.steps"))}</h4>
       <ol class="steps">${dish.steps.split(/(?<=\.)\s+/).filter(x=>x.trim())
         .slice(0,10).map(x=>`<li>${esc(x.trim())}</li>`).join("")}</ol>` : ""}
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:16px;line-height:1.55">
       ${esc(t("dish.basisNote"))}</div>`;
+  el("dlgBody").querySelectorAll(".sub-btn").forEach(btn =>
+    btn.onclick = () => reviewSubstitute(btn.dataset.ingredient, btn));
   el("dlg").showModal();
+}
+
+/** Calls the Substitution Reviewer agent — a separate, differently-prompted
+ * agent from the Planner (see substitution.py): not a re-optimisation, a
+ * judgment call over one ingredient in an already-chosen dish. */
+async function reviewSubstitute(ingredient, btn){
+  const out = el("subResult");
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "…";
+  out.innerHTML = `<div class="empty" style="padding:14px">${esc(t("sub.calling"))}</div>`;
+  try{
+    const res = await fetch(API + "/api/substitute", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({dish_id: CURRENT_DISH_ID, ingredient, lang: LANG})
+    });
+    if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const r = await res.json();
+    const badge = r.is_core
+      ? `<span class="qbadge medium">${esc(t("sub.core"))}</span>`
+      : `<span class="qbadge high">${esc(t("sub.flexible"))}</span>`;
+    const sourceTag = r.source === "sealion"
+      ? `<span class="qbadge high" style="margin-left:6px">${esc(t("sub.fromModel"))}</span>`
+      : `<span class="qbadge medium" style="margin-left:6px">${esc(t("sub.fromRules"))}</span>`;
+    const subLine = r.action === "substitute" && r.substitute
+      ? `<div style="margin-top:8px;font-size:13.5px">
+           <strong>${esc(t("sub.useInstead"))}:</strong> ${esc(r.substitute.name)}
+           <span class="mono" style="color:var(--ink-soft);font-size:11.5px">
+             (${r.substitute.energy_kcal} ${esc(t("u.kcal"))}, ${r.substitute.protein_g}${esc(t("u.g"))} protein)</span>
+         </div>` : "";
+    out.innerHTML = `<div class="notice" style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">${badge}${sourceTag}</div>
+      <div style="font-size:13.5px">${esc(r.reason)}</div>${subLine}</div>`;
+  }catch(err){
+    out.innerHTML = `<div class="notice" style="margin-top:12px">${esc(t("ask.failed", {error: err.message}))}</div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = original;
+  }
 }
 
 /* ---------------- procurement ---------------- */
@@ -918,13 +1317,72 @@ function renderProcurement(){
     portions: num(PROC.portions)});
   el("procurement").innerHTML = `<table>
     <thead><tr><th>${esc(t("proc.thName"))}</th><th class="num">${esc(t("proc.thWeight"))}</th>
-      <th class="num">${esc(t("proc.thCost"))}</th><th>${esc(t("proc.thUsed"))}</th></tr></thead>
+      <th class="num">${esc(t("proc.thCost"))}</th><th>${esc(t("proc.thUsed"))}</th><th></th></tr></thead>
     <tbody>${PROC.lines.map(l => `<tr class="${l.matched ? "" : "dim"}">
       <td>${esc(l.name)}</td>
       <td class="num">${l.gross_kg.toFixed(2)} kg</td>
       <td class="num">${rp(l.cost_idr)}</td>
       <td style="font-size:11.5px;color:var(--ink-soft)">${esc(l.used_in.slice(0,3).join(", "))}${l.used_in.length>3?` +${l.used_in.length-3}`:""}</td>
-    </tr>`).join("")}</tbody></table>`;
+      <td>${l.matched ? `<button type="button" class="btn ghost leftover-toggle"
+        data-key="${esc(l.key)}" data-name="${esc(l.name)}" data-kg="${l.gross_kg}"
+        style="font-size:11px;padding:5px 9px;white-space:nowrap">${esc(t("proc.leftover"))}</button>` : ""}</td>
+    </tr>
+    <tr class="leftover-row hidden" data-for="${esc(l.key)}"><td colspan="5" style="padding-top:0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--paper-dim);
+        border-radius:8px;padding:10px 12px;font-size:12.5px">
+        <span>${esc(t("proc.leftoverLabel"))}</span>
+        <input type="number" class="leftover-kg" min="0" step="0.1" style="width:80px;padding:6px 8px;font-size:12.5px" placeholder="kg">
+        <span>${esc(t("proc.leftoverDays"))}</span>
+        <input type="number" class="leftover-days" min="1" max="14" value="3" style="width:60px;padding:6px 8px;font-size:12.5px">
+        <button type="button" class="btn leftover-save" style="padding:6px 12px;font-size:12.5px">${esc(t("proc.leftoverSave"))}</button>
+        <span class="leftover-result mono" style="font-size:11px;color:var(--ink-soft)"></span>
+      </div>
+    </td></tr>`).join("")}</tbody></table>`;
+
+  el("procurement").querySelectorAll(".leftover-toggle").forEach(btn =>
+    btn.onclick = () => {
+      const row = el("procurement").querySelector(`.leftover-row[data-for="${CSS.escape(btn.dataset.key)}"]`);
+      row.classList.toggle("hidden");
+    });
+  el("procurement").querySelectorAll(".leftover-row").forEach(row => {
+    const key = row.dataset.for;
+    const toggleBtn = el("procurement").querySelector(`.leftover-toggle[data-key="${CSS.escape(key)}"]`);
+    row.querySelector(".leftover-save").onclick = () =>
+      saveLeftover(key, toggleBtn.dataset.name,
+        row.querySelector(".leftover-kg"), row.querySelector(".leftover-days"),
+        row.querySelector(".leftover-result"), row, toggleBtn);
+  });
+}
+
+/** Reported leftovers feed optimizer.py's pantry bonus (the mirror image
+ * of the recency penalty): using this stock up gets nudged for the days
+ * it's still marked good for, scoped by province+stage same as ratings.
+ * On success the row collapses and the toggle marks itself done — before
+ * this it stayed open and editable with no visible "recorded" state, so
+ * a second click on Simpan looked indistinguishable from the first. */
+async function saveLeftover(tkpiCode, name, kgInput, daysInput, result, row, toggleBtn){
+  const kg = parseFloat(kgInput.value);
+  if(!Number.isFinite(kg) || kg < 0){ result.textContent = t("proc.leftoverInvalid"); return; }
+  result.textContent = "…";
+  try{
+    const res = await fetch(API + "/api/pantry/report", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        province: LAST_BODY.province, stage: LAST_BODY.stage,
+        tkpi_code: tkpiCode, ingredient_name: name,
+        remaining_g: kg * 1000, usable_within_days: +daysInput.value || null
+      })
+    });
+    if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    result.textContent = t("proc.leftoverSaved");
+    if(toggleBtn){
+      toggleBtn.textContent = "✓ " + t("proc.leftoverSaved").split(" ")[0];
+      toggleBtn.disabled = true;
+    }
+    setTimeout(() => { if(row) row.classList.add("hidden"); }, 900);
+  }catch(err){
+    result.textContent = t("rate.failed");
+  }
 }
 
 function downloadCsv(){
@@ -1015,7 +1473,7 @@ function renderAnswer(d){
 
   el("askOut").innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">${modeTag}
-      <span style="font-size:11.5px;color:var(--ink-soft)">${esc(t("ask.steps", {n: d.steps, reason: d.stopped_because}))}</span></div>
+      <span style="font-size:11.5px;color:var(--ink-soft)">${esc(t("ask.steps", {n: d.steps, reason: friendlyReason(d.stopped_because)}))}</span></div>
     <div style="font-size:13.5px;line-height:1.65;white-space:pre-wrap">${esc(d.answer)}</div>
     ${plan}${tools}`;
 }
@@ -1031,8 +1489,8 @@ el("askExample").onclick = () => {
 el("askBox").addEventListener("keydown", e => {
   if((e.metaKey || e.ctrlKey) && e.key === "Enter") ask();
 });
-el("go").onclick = () => generate();
-el("reshuffleBtn").onclick = () => generate(Math.floor(Math.random() * 100000));
+el("go").onclick = () => generate(undefined, el("go"));
+el("reshuffleBtn").onclick = () => generate(Math.floor(Math.random() * 100000), el("reshuffleBtn"));
 el("backBtn").onclick = () => {
   el("result").classList.add("hidden");
   el("setup").classList.remove("hidden");
