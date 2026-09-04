@@ -187,8 +187,8 @@ class Dish:
             "dish_id": self.dish_id, "name": self.name, "province": self.province,
             "island": self.island, "slot": self.slot, "servings": self.servings,
             "method": self.method,
-            "cost_per_portion_idr": round(self.cost_per_portion_idr, 1),
-            "portion_mass_g": round(self.portion_mass_g, 1),
+            "cost_per_portion_idr": round(self.cost_per_portion_idr or 0.0, 1),
+            "portion_mass_g": round(self.portion_mass_g or 0.0, 1),
             "per_portion": {k: round(v, 3) for k, v in self.per_portion.items()},
             "quality": self.quality.score, "quality_label": self.quality.label,
         }
