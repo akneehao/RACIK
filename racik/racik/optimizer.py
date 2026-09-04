@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional, Sequence
 
 from ortools.sat.python import cp_model
@@ -83,6 +83,35 @@ PREFERENCE_NATIONAL = 0.5
 PREFERENCE_OTHER = 0.2
 
 
+@dataclass(frozen=True)
+class Pin:
+    """A dish the operator accepted and wants held through a re-solve.
+
+    Pins are the operator-review half of a replan: "Monday is fine, rebuild the
+    rest". They are hard equalities in the model, but they never override a
+    gate — an ingredient that has run out removes a dish whether or not someone
+    pinned it, and the pin is reported as dropped rather than silently honoured.
+    """
+
+    day_index: int
+    slot: str
+    dish_id: int
+
+    def to_dict(self) -> dict:
+        return {"day": self.day_index, "slot": self.slot, "dish_id": self.dish_id}
+
+
+@dataclass
+class DroppedPin:
+    """A pin the solve could not honour, and the reason a reader can act on."""
+
+    pin: Pin
+    reason: str
+
+    def to_dict(self) -> dict:
+        return {**self.pin.to_dict(), "reason": self.reason}
+
+
 @dataclass
 class PlanRequest:
     """What the kitchen is asking for."""
@@ -95,6 +124,7 @@ class PlanRequest:
     config: MBGConfig = field(default_factory=lambda: MBG)
     exclude_terms: Sequence[str] = ()       # allergy / preference exclusions
     exclude_dish_ids: Sequence[int] = ()
+    pins: Sequence[Pin] = ()                # days the operator already accepted
     no_repeat_slots: Sequence[str] = ("hewani", "nabati", "sayur", "buah")
     repeat_window: int = 7                  # days a dish must not recur within
     max_family_per_plan: int = 2            # times one main ingredient may fill a slot
@@ -182,6 +212,14 @@ class PlanResult:
     status: str
     solve_seconds: float
     candidates_considered: int
+    dropped_pins: list[DroppedPin] = field(default_factory=list)
+
+    @property
+    def kept_pins(self) -> list[Pin]:
+        """Pins the solve actually honoured."""
+        dropped = {(d.pin.day_index, d.pin.slot) for d in self.dropped_pins}
+        return [p for p in self.request.pins
+                if (p.day_index, p.slot) not in dropped]
 
     @property
     def feasible(self) -> bool:
@@ -214,6 +252,8 @@ class PlanResult:
                 self.request.config.ingredient_budget_idr, 1),
             "budget_overrun_idr": round(self.budget_overrun_idr, 1),
             "relaxed_floors": len(self.relaxations),
+            "pins_kept": len(self.kept_pins),
+            "pins_dropped": len(self.dropped_pins),
             "mean_adequacy": round(
                 sum(self.adequacy(d) for d in self.days) / len(self.days), 3
             ) if self.days else 0.0,
@@ -253,6 +293,10 @@ class MenuOptimizer:
         excluded_ids = set(request.exclude_dish_ids)
         budget = request.config.ingredient_budget_idr
         ceiling = budget * COST_CEILING_SHARE
+        pinned: dict[str, set[int]] = {}
+        for pin in request.pins:
+            if pin.slot in self.by_slot:
+                pinned.setdefault(pin.slot, set()).add(pin.dish_id)
 
         out: dict[str, tuple[list[Dish], CandidateFunnel]] = {}
         for slot in SLOTS:
@@ -282,6 +326,16 @@ class MenuOptimizer:
             deduped = _dedupe_by_name(pool)
             funnel.cut_duplicate_name = len(pool) - len(deduped)
             selected = deduped[:request.candidates_per_slot]
+            # A pinned dish must reach the solver even where the ranking cap or
+            # the name de-duplication would have cut it: the operator has
+            # already accepted it, and re-solving is not an invitation to
+            # re-litigate that. Gates still apply — a pin cannot smuggle a dish
+            # past an exclusion, because `pool` is the post-gate list.
+            wanted = pinned.get(slot, set())
+            if wanted:
+                have = {d.dish_id for d in selected}
+                selected = selected + [d for d in pool
+                                       if d.dish_id in wanted and d.dish_id not in have]
             funnel.selected = len(selected)
             funnel.top = [
                 {"dish_id": d.dish_id, "name": d.name, "province": d.province,
@@ -338,8 +392,74 @@ class MenuOptimizer:
             "funnel": [f.to_dict() for _, f in funnels.values()],
         }
 
+    # ------------------------------------------------------------ pins
+    def _resolve_pins(
+            self, request: PlanRequest, candidates: dict[str, list[Dish]]
+    ) -> tuple[dict[tuple[int, str], int], list[DroppedPin]]:
+        """Locate each pinned dish in its slot's candidate pool.
+
+        A pin that cannot be located is dropped with a reason rather than
+        ignored, because "Monday stayed the same" and "Monday quietly changed"
+        are very different things to an operator who already signed off on it.
+        """
+        index: dict[tuple[int, str], int] = {}
+        dropped: list[DroppedPin] = []
+        for pin in request.pins:
+            key = (pin.day_index, pin.slot)
+            if key in index:
+                continue                    # one dish per slot per day; first wins
+            pool = (candidates.get(pin.slot, [])
+                    if 0 <= pin.day_index < request.days else [])
+            found = next((i for i, d in enumerate(pool)
+                          if d.dish_id == pin.dish_id), None)
+            if found is None:
+                dropped.append(DroppedPin(pin, self._pin_reason(pin, request)))
+            else:
+                index[key] = found
+        return index, dropped
+
+    def _pin_reason(self, pin: Pin, request: PlanRequest) -> str:
+        """Which gate removed a pinned dish — the same order `solve` applies."""
+        if not 0 <= pin.day_index < request.days:
+            return "day_out_of_range"
+        if pin.slot not in self.by_slot:
+            return "unknown_slot"
+        dish = next((d for d in self.by_slot[pin.slot]
+                     if d.dish_id == pin.dish_id), None)
+        if dish is None:
+            return "not_in_slot"
+        if pin.dish_id in set(request.exclude_dish_ids):
+            return "rejected"
+        if pin.slot in COMPONENT_ONLY_SLOTS and dish.dish_id < COMPONENT_ID_BASE:
+            return "source"
+        terms = {t.lower() for t in request.exclude_terms if t.strip()}
+        if terms and _excluded(dish, terms):
+            return "excluded"
+        ceiling = request.config.ingredient_budget_idr * COST_CEILING_SHARE
+        if dish.cost_per_portion_idr > ceiling:
+            return "cost_ceiling"
+        return "unavailable"
+
     # ------------------------------------------------------------ solve
     def solve(self, request: PlanRequest) -> PlanResult:
+        """Solve, and never let a pin be the reason there is no menu.
+
+        Pins are hard, so a set of them can contradict the variety constraints
+        — the same reason nutrient floors are soft applies here. On an
+        infeasible solve with pins, drop them all and return the free menu with
+        every pin reported as conflicting, rather than handing the kitchen an
+        error at five in the morning.
+        """
+        result = self._solve_once(request)
+        if result.feasible or not request.pins or result.status == "NO_CANDIDATES":
+            return result
+
+        result = self._solve_once(replace(request, pins=()))
+        result.request = request
+        result.dropped_pins = [DroppedPin(p, "conflict") for p in request.pins]
+        return result
+
+    def _solve_once(self, request: PlanRequest) -> PlanResult:
         from .akg import stage_band
 
         band = stage_band(request.stage)
@@ -375,6 +495,11 @@ class MenuOptimizer:
                     model.Add(sum(picks) <= 1)
                 else:
                     model.AddExactlyOne(picks)
+
+        # --- operator pins: slots already accepted are held in place
+        pin_index, dropped_pins = self._resolve_pins(request, candidates)
+        for (d, slot), i in pin_index.items():
+            model.Add(x[d, slot, i] == 1)
 
         # --- variety: no dish recurs inside the window
         for slot in request.no_repeat_slots:
@@ -470,11 +595,13 @@ class MenuOptimizer:
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return PlanResult(request, band, targets, [], [], 0.0,
                               solver.StatusName(status),
-                              solver.WallTime(), total_candidates)
+                              solver.WallTime(), total_candidates, dropped_pins)
 
-        return self._extract(solver, x, candidates, request, band, targets,
-                             binding, nutrient_slack, budget_slack, status,
-                             total_candidates)
+        result = self._extract(solver, x, candidates, request, band, targets,
+                               binding, nutrient_slack, budget_slack, status,
+                               total_candidates)
+        result.dropped_pins = dropped_pins
+        return result
 
     # ------------------------------------------------------------ extraction
     @staticmethod
