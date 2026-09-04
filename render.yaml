@@ -20,6 +20,14 @@ services:
     envVars:
       - key: RACIK_LLM_PROVIDER
         value: bedrock
+      # CP-SAT's search speed scales with real CPU, not wall-clock time
+      # budget alone. On free/starter's throttled vCPU, the default
+      # candidates-per-slot (220) can't reach a fully-compliant plan before
+      # the request times out. Empirically, 100 reaches the same zero
+      # relaxed-floor result in under half the CPU work — cut it further
+      # (e.g. 60) if generations still fail on your instance size.
+      - key: RACIK_CANDIDATES_PER_SLOT
+        value: "100"
       - key: BEDROCK_MODEL_ID
         sync: false
       - key: AWS_REGION
