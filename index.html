@@ -10,8 +10,6 @@
 </head>
 <body>
 
-<body>
-
 <div class="topbar" id="onboardingTopbar">
   <div class="brand">
     <div class="brand-mark">R</div>
@@ -129,7 +127,7 @@
         <div class="field-group">
           <h3>Allergy / preference notes <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
           <p class="field-hint">E.g. avoid peanuts, reduce spicy food, add more vegetarian options.</p>
-          <textarea placeholder="Write any notes here…"></textarea>
+          <textarea id="notesInput" placeholder="Write any notes here…"></textarea>
         </div>
       </div>
 
@@ -222,7 +220,7 @@
             <div class="metric">
               <div class="label">Average / Portion</div>
               <div class="value" id="metricAvgPortion">Rp 9,500</div>
-              <div class="sub">120 people / day</div>
+              <div class="sub" id="metricPortionSub">120 people / day</div>
             </div>
             <div class="metric">
               <div class="label">Nutrition Status</div>
@@ -280,6 +278,15 @@
               <li>Meets 88% of the daily protein target for this age group</li>
               <li>Within 3% of the per-portion budget</li>
             </ul>
+          </div>
+
+          <div class="why-panel" id="compliancePanel">
+            <div class="why-panel-head">
+              <h3>Daily nutrition compliance</h3>
+            </div>
+            <p class="data-card-sub" id="complianceMethod" style="margin-top:-6px; margin-bottom:14px;"></p>
+            <div class="nutrition-panel" id="complianceEnforced" style="background:transparent; padding:0; margin-bottom:14px;"></div>
+            <div class="nutrition-panel" id="complianceInfoOnly" style="background:transparent; padding:0;"></div>
           </div>
 
           <div class="dish-block">

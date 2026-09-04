@@ -5,13 +5,14 @@
 // Responsibility split:
 //   state.js         shared mutable app state
 //   utils.js         formatting, toast, screen/tab visibility helpers
-//   data.js          static recipe pool + dish SVG illustrations
-//   aggregation.js   ingredient aggregation shared by Procurement & Inventory
+//   api.js           fetch wrapper for every racik.racik.api endpoint
+//   icons.js         generic per-slot SVG illustrations (no per-dish assets)
 //   onboarding.js    Screen 1 (location) + Screen 2 (parameters)
-//   plan.js          Screen 3 (weekly tray) + Screen 4 (day detail)
-//   procurement.js   Procurement tab
-//   inventory.js     Stock & Audit tab
-//   settings.js      Settings tab
+//   plan.js          Screen 3 (weekly tray) + Screen 4 (day detail); calls
+//                    /api/generate and /api/review
+//   procurement.js   Procurement tab (reads the plan's embedded procurement data)
+//   inventory.js     Stock & Audit tab; calls /api/stock
+//   settings.js      Settings tab; calls /api/history and /api/report
 //   shell.js         sidebar shell + tab switching (this file wires it up)
 
 import { initOnboarding } from './onboarding.js';
@@ -56,10 +57,11 @@ function main() {
     goToPlanTab: () => goToTab('plan'),
   });
 
-  // The onboarding "Generate Meal Plan" button builds the tray, then hands
-  // off from the two onboarding screens to the persistent sidebar shell.
-  initOnboarding(() => {
-    buildTray();
+  // The onboarding "Generate Meal Plan" button builds the tray (a real
+  // /api/generate call per calendar week), then hands off from the two
+  // onboarding screens to the persistent sidebar shell.
+  initOnboarding(async () => {
+    await buildTray();
     enterAppShell(renderers);
   });
 }

@@ -105,10 +105,14 @@ def test_plan_notes_follow_the_language(client):
     id_plan = client.post("/api/plan", json={**base, "lang": "id"}).json()
     en_plan = client.post("/api/plan", json={**base, "lang": "en"}).json()
     assert id_plan["lang"] == "id" and en_plan["lang"] == "en"
-    assert "TKPI" in id_plan["notes"][0] and "TKPI" in en_plan["notes"][0]
+    # notes[0] is now the compliance-methodology explanation (see
+    # note.compliance_method); the TKPI data-source note follows it.
+    assert "TKPI" in id_plan["notes"][1] and "TKPI" in en_plan["notes"][1]
+    assert id_plan["notes"][1] != en_plan["notes"][1]
+    assert "berat mentah" in id_plan["notes"][1]
+    assert "raw-weight" in en_plan["notes"][1]
     assert id_plan["notes"][0] != en_plan["notes"][0]
-    assert "berat mentah" in id_plan["notes"][0]
-    assert "raw-weight" in en_plan["notes"][0]
+    assert "AKG" in id_plan["notes"][0] and "AKG" in en_plan["notes"][0]
 
 
 def test_energy_unit_follows_the_language(client):

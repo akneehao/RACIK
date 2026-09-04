@@ -296,10 +296,17 @@ def test_bedrock_verify_reports_rather_than_raises():
     ({"BEDROCK_MODEL_ARN": "arn:aws:bedrock:us-east-1:1:imported-model/x"},
      "SEA-LION on Amazon Bedrock (Custom Model Import)"),
     ({"SEALION_BASE_URL": "http://localhost:8000/api/v1"},
-     "SEA-LION (AI Singapore)"),
+     "Self-hosted OpenAI-compatible server (http://localhost:8000/api/v1)"),
+    ({"BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-v1:0"},
+     "AWS Bedrock (Converse API)"),
+    ({"RACIK_LLM_PROVIDER": "bedrock-sealion-import"},
+     "SEA-LION on Amazon Bedrock (Custom Model Import)"),
+    ({"ANTHROPIC_API_KEY": "sk-ant-test"}, "Anthropic (direct API)"),
+    ({"OPENAI_API_KEY": "sk-proj-test"}, "OpenAI (direct API)"),
 ])
 def test_provider_factory_selects_by_environment(monkeypatch, env, expected):
-    for key in ("RACIK_LLM_PROVIDER", "BEDROCK_MODEL_ARN", "SEALION_BASE_URL"):
+    for key in ("RACIK_LLM_PROVIDER", "BEDROCK_MODEL_ARN", "BEDROCK_MODEL_ID",
+               "SEALION_BASE_URL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -391,10 +398,10 @@ def test_report_escapes_dish_names(client):
 
 def test_report_notes_match_the_api_notes(client):
     """The report and the API must not tell two stories about the same plan."""
-    from racik.api import _notes
+    from racik.serialize import serialise_plan
     from racik.report import plan_notes
     from racik.optimizer import MenuOptimizer, PlanRequest
     from racik.store import RacikStore
     result = MenuOptimizer(RacikStore().load_dishes()).solve(
         PlanRequest(days=1, stage="sd", max_solve_seconds=8))
-    assert _notes(result, "id") == plan_notes(result, "id")
+    assert serialise_plan(result, "id")["notes"] == plan_notes(result, "id")

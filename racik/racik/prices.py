@@ -48,6 +48,12 @@ class PriceTable:
                         for k, v in payload.get("unmatched_by_name", {}).items()}
         self.default = float(payload.get("default_idr_per_kg", 25_000))
         self.cost_index = cost_index
+        # Derived from data/wfp_food_prices_idn.csv by scripts/build_prices.py:
+        # {province -> ratio of that province's retail price to the national
+        # mean, for the commodities the WFP survey tracks}. Real market data,
+        # not a placeholder — see regional_index_for() and that script's docstring.
+        self._regional_index = {
+            k: float(v) for k, v in payload.get("regional_cost_index_by_province", {}).items()}
 
     @classmethod
     def load(cls, path: str | Path | None = None, cost_index: float = 1.0) -> "PriceTable":
@@ -76,6 +82,24 @@ class PriceTable:
         clone.__dict__.update(self.__dict__)
         clone.cost_index = cost_index
         return clone
+
+    def regional_index_for(self, province: str) -> float:
+        """Real "indeks kemahalan daerah" for `province`, or 1.0 (national
+        baseline) if it isn't covered by the WFP survey behind this table.
+
+        Case-insensitive; the province string is expected in the recipe
+        corpus's spelling (racik.store.RacikStore.provinces()).
+        """
+        if not province:
+            return 1.0
+        target = province.strip().lower()
+        for name, index in self._regional_index.items():
+            if name.lower() == target:
+                return index
+        return 1.0
+
+    def has_regional_data(self) -> bool:
+        return bool(self._regional_index)
 
 
 class LivePriceClient:

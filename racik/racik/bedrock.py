@@ -248,16 +248,51 @@ def _to_chat_result(body: dict) -> ChatResult:
 def make_client() -> SeaLionClient:
     """Pick the LLM provider from the environment.
 
-    RACIK_LLM_PROVIDER = bedrock | gateway | sealion   (default: sealion)
+    RACIK_LLM_PROVIDER = openai | anthropic | bedrock | bedrock-sealion-import
+                          | gateway | sealion   (default: sealion)
 
-      bedrock   BEDROCK_MODEL_ARN, AWS_REGION            — boto3 InvokeModel
+      openai                  OPENAI_API_KEY, OPENAI_MODEL (optional) —
+                               OpenAI's Chat Completions API. No new client
+                               needed: it's the same OpenAI-compatible shape
+                               SeaLionClient already speaks, just pointed at
+                               api.openai.com.
+      anthropic               ANTHROPIC_API_KEY, ANTHROPIC_MODEL (optional)
+                               — direct Anthropic Messages API, no AWS
+                               account needed. Useful for testing the agent
+                               pipeline's live-LLM path independently of
+                               Bedrock credential availability; see
+                               anthropic_client.py.
+      bedrock                 BEDROCK_MODEL_ID, AWS_REGION  — Converse API,
+                               any standard Bedrock foundation model
+                               (Claude, Nova, Llama, ...). This is what
+                               ordinary "I have Bedrock access" means; prefer
+                               it unless you specifically need SEA-LION.
+      bedrock-sealion-import  BEDROCK_MODEL_ARN, AWS_REGION — boto3
+                               InvokeModel against a SEA-LION model brought in
+                               via Bedrock Custom Model Import (this module's
+                               BedrockSeaLionClient, above). Narrower and
+                               tool-calling is not guaranteed — see the module
+                               docstring.
       gateway   SEALION_BASE_URL (Bedrock Access Gateway) — OpenAI-compatible
       sealion   SEALION_API_KEY                           — hosted API
     """
     provider = os.environ.get("RACIK_LLM_PROVIDER", "").strip().lower()
     base_url = os.environ.get("SEALION_BASE_URL", "").strip()
 
-    if provider == "bedrock" or (not provider and os.environ.get("BEDROCK_MODEL_ARN")):
+    if provider == "openai" or (not provider and os.environ.get("OPENAI_API_KEY")):
+        return SeaLionClient(
+            api_key=os.environ.get("OPENAI_API_KEY", ""),
+            base_url="https://api.openai.com/v1",
+            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            min_interval=0.0)
+    if provider == "anthropic" or (not provider and os.environ.get("ANTHROPIC_API_KEY")):
+        from .anthropic_client import AnthropicClient
+        return AnthropicClient()
+    if provider == "bedrock" or (not provider and os.environ.get("BEDROCK_MODEL_ID")):
+        from .bedrock_converse import BedrockConverseClient
+        return BedrockConverseClient()
+    if provider == "bedrock-sealion-import" or (
+            not provider and os.environ.get("BEDROCK_MODEL_ARN")):
         return BedrockSeaLionClient()
     if provider == "gateway" or (not provider and base_url):
         return SeaLionClient(

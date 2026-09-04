@@ -20,7 +20,7 @@ from datetime import date
 from typing import Iterable, Optional
 
 from .akg import BINDING_NUTRIENTS, NUTRIENT_META
-from .config import SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS
+from .config import MBG, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS
 from .i18n import norm_lang, t, unit
 from .optimizer import PlanResult
 from .procurement import ProcurementLine, totals
@@ -309,7 +309,9 @@ def plan_notes(result: PlanResult, lang: str = "id") -> list[str]:
     into telling a reader two different stories about the same numbers.
     """
     label = 0 if norm_lang(lang) == "id" else 1
-    notes = [t(lang, "note.method"), t(lang, "note.servings"),
+    notes = [t(lang, "note.compliance_method",
+               fraction=f"{MBG.akg_fraction * 100:.0f}%"),
+             t(lang, "note.method"), t(lang, "note.servings"),
              t(lang, "note.prices")]
     if not result.request.enforce_micronutrients:
         notes.append(t(lang, "note.micro"))

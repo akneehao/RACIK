@@ -11,10 +11,30 @@ from pathlib import Path
 # ---------------------------------------------------------------- paths
 PKG_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = PKG_DIR.parent
+
+# Load racik/.env (gitignored, see .env.example) into the process environment
+# before anything reads os.environ for a provider key/model id — bedrock.py's
+# make_client() and friends read lazily at call time, but config.py is the
+# first module every other module imports, so this always runs first.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_DIR / ".env")
+except ImportError:                # dotenv is optional; real env vars still work
+    pass
+
 DATA_DIR = PROJECT_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 DB_PATH = DATA_DIR / "racik.db"
+# Separate from DB_PATH deliberately: racik.db is a read-only artefact rebuilt
+# wholesale by scripts/build_db.py; this one accumulates operator reviews,
+# served-dish history and stock/audit records across the app's lifetime, and
+# must never be touched by the ETL.
+STATE_DB_PATH = DATA_DIR / "racik_state.db"
 UI_DIR = PROJECT_DIR / "ui"
+# The styled operator frontend (mockup-derived) lives at the repo root, one
+# level above the racik/ package — sibling to, not inside, this project.
+REPO_ROOT = PROJECT_DIR.parent
+FRONTEND_DIR = REPO_ROOT
 
 
 # ---------------------------------------------------------------- MBG program

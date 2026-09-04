@@ -104,7 +104,7 @@ class SeaLionClient:
 
     def describe(self) -> dict:
         return {
-            "provider": "SEA-LION (AI Singapore)",
+            "provider": _describe_provider(self.base_url),
             "model": self.model,
             "base_url": self.base_url,
             "configured": self.configured,
@@ -222,3 +222,20 @@ def _read_error(exc: urllib.error.HTTPError) -> str:
         return exc.read().decode("utf-8")[:400]
     except Exception:
         return exc.reason or "unknown"
+
+
+def _describe_provider(base_url: str) -> str:
+    """Name the provider from base_url rather than hardcoding "SEA-LION" —
+    this client is reused verbatim for any OpenAI-compatible endpoint (see
+    bedrock.py's make_client()), and /api/orchestrator reporting the wrong
+    provider would be exactly the kind of quiet mismatch this codebase's
+    other surfaces (report.py, serialize.py) go out of their way to avoid.
+    """
+    host = base_url.lower()
+    if "api.sea-lion.ai" in host:
+        return "SEA-LION (AI Singapore)"
+    if "api.openai.com" in host:
+        return "OpenAI (direct API)"
+    if "localhost" in host or "127.0.0.1" in host:
+        return f"Self-hosted OpenAI-compatible server ({base_url})"
+    return f"OpenAI-compatible endpoint ({base_url})"

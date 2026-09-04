@@ -10,11 +10,16 @@ under AKG 2019 nutrient floors, the MBG per-portion budget, and the "Isi
 Piringku" tray composition.
 
 ```bash
-pip install ortools fastapi uvicorn rapidfuzz pandas openpyxl pytest
+pip install -r requirements.txt boto3
 python scripts/build_db.py                      # ~30 s, builds data/racik.db
-export SEALION_API_KEY=...                      # optional; enables the orchestrator
+export RACIK_LLM_PROVIDER=bedrock BEDROCK_MODEL_ID=...   # optional; see below
 python -m uvicorn racik.api:app --port 8000     # then open http://127.0.0.1:8000
 ```
+
+The styled operator frontend (`../index.html`, `../css/`, `../js/`) is served
+at `/`; the plainer Indonesian-language reference UI stays at `/legacy`. No
+LLM provider is required — without one, Agen Gizi, Agen Biaya, and the
+orchestrator all fall back to a deterministic rule-based path.
 
 ---
 
@@ -107,6 +112,63 @@ curl -s localhost:8000/api/ask -H 'Content-Type: application/json' \
   -d '{"question":"Menu 5 hari untuk SMP di Jawa Tengah, 150 porsi, tanpa udang"}'
 ```
 
+## Agen Gizi, Agen Biaya, and the Validator
+
+`POST /api/generate` is the pipeline the styled frontend actually drives, and
+it runs a fixed sequence rather than leaving the shape of the pipeline to a
+model's tool choice — five stages every time, so a live demo never skips one:
+
+```
+Preprocessing (G1-G5 gates, unchanged)
+        │
+        ▼
+  Agen Gizi ──┐          agents.py: one narrow, temperature-0 tool call each.
+  Agen Biaya ─┤          Reads the operator's free-text notes / budget mode
+              │          and returns *configuration knobs* — exclude_terms,
+              │          enforce_micronutrients, ingredient_budget_share,
+              │          regional_cost_index — plus a one-paragraph rationale.
+              │          Never a gram, a rupiah, or an adequacy percentage:
+              │          same "model orchestrates, never calculates" rule
+              │          as the orchestrator above. No LLM configured? A
+              │          conservative rule-based fallback answers instead,
+              │          so /api/generate always completes.
+              ▼
+     MenuOptimizer.solve()      <- unchanged CP-SAT core
+              │
+              ▼
+        Validator               agents.py: NOT an LLM call. Re-derives
+                                 pass/fail per day straight from the solved
+                                 PlanResult, so it can never disagree with
+                                 the numbers /api/plan would show for the
+                                 same solve.
+              │
+              ▼
+   persisted run + menu plan   <- statedb.py
+```
+
+Every stage's rationale lands in the response's `trace` array, and the run is
+persisted (`racik/data/racik_state.db`, separate from the read-only
+`racik.db`) so three things the original engine had no memory of now work:
+
+- **Operator review** — `POST /api/review` records an accept/reject + reason
+  per day; a reject with `replace: true` re-solves just that day, excluding
+  the rejected dishes.
+- **Menu history / rotation** — every real (non-component) dish served is
+  logged; the next `generate()` call excludes anything served in the last 14
+  days by default (`history_days`), so a week doesn't quietly repeat itself.
+  It decays rather than bans permanently: the exclusion is a rolling window
+  read at solve time, not a persistent blacklist.
+- **Stock & audit** — `POST`/`GET /api/stock` records received %, used %,
+  actual cost, and a note per ingredient per day, against the same
+  TKPI-deduplicated ingredient list `/api/generate`'s embedded procurement
+  breakdown already computed — so "planned" never disagrees between the
+  Procurement and Stock & Audit tabs.
+
+```bash
+curl -s localhost:8000/api/generate -H 'Content-Type: application/json' \
+  -d '{"days":5,"portions":120,"province":"Jawa Tengah","budget_mode":"total","budget_value":3500000,"notes":"tanpa udang"}'
+```
+
 Model ids come from the [SEA-LION API docs](https://docs.sea-lion.ai/): the hosted
 `https://api.sea-lion.ai/v1` endpoint is OpenAI-compatible and serves
 `aisingapore/Qwen-SEA-LION-v4.5-27B-IT`, documented at 10 requests/minute — the
@@ -164,19 +226,60 @@ costs nothing. **The gloss never replaces the name**: the kitchen cooks "Semur
 Ikan Bandeng", and the English sits beside it. Every result reports whether it
 came from the model (`sealion`/`cache`) or the offline glosser (`rule`).
 
-## Running SEA-LION on Amazon Bedrock
+## Choosing an LLM provider
 
-SEA-LION is not a native Bedrock foundation model; it reaches Bedrock through
-**Custom Model Import**. `make_client()` selects the provider from the
-environment:
+`make_client()` (`racik/bedrock.py`) picks the provider from the environment:
 
 ```bash
-RACIK_LLM_PROVIDER=bedrock  BEDROCK_MODEL_ARN=arn:aws:bedrock:us-east-1:...:imported-model/...
+RACIK_LLM_PROVIDER=anthropic               ANTHROPIC_API_KEY=sk-ant-...          # direct Anthropic API, no AWS account
+RACIK_LLM_PROVIDER=bedrock                 BEDROCK_MODEL_ID=anthropic.claude-haiku-4-5-...   # standard model, Converse API
+RACIK_LLM_PROVIDER=bedrock-sealion-import  BEDROCK_MODEL_ARN=arn:aws:bedrock:...:imported-model/...  # SEA-LION via Custom Model Import
 RACIK_LLM_PROVIDER=gateway  SEALION_BASE_URL=http://localhost:8000/api/v1   # Bedrock Access Gateway
-RACIK_LLM_PROVIDER=sealion  SEALION_API_KEY=...                             # hosted (default)
+RACIK_LLM_PROVIDER=sealion  SEALION_API_KEY=...                             # hosted SEA-LION (default)
 ```
 
-Constraints, verified against AWS documentation rather than assumed:
+**`openai` / `anthropic` (fastest way to test the live-LLM path).**
+No AWS account or Bedrock model-access request needed — just a key.
+`openai` reuses `SeaLionClient` as-is (pointed at `api.openai.com`; OpenAI's
+Chat Completions API is the exact OpenAI-compatible shape that client
+already speaks) with `OPENAI_API_KEY`/`OPENAI_MODEL` (default
+`gpt-4o-mini`). `anthropic` uses `racik/anthropic_client.py`'s
+`AnthropicClient` against the Messages API directly, with
+`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` (default a Claude Haiku model). Both
+share the same duck-typed interface as every provider here, so switching to
+Bedrock later is an env var change, not a code change.
+
+**`bedrock` (recommended once you have ordinary Bedrock access).**
+`racik/bedrock_converse.py`'s `BedrockConverseClient` calls any standard
+Bedrock foundation model — Claude, Nova, Llama, whatever's enabled in your
+account — through the **Converse API**: documented, tool-calling-guaranteed,
+no import job, no context-window surgery. Reads `BEDROCK_MODEL_ID` and
+`AWS_REGION`/`AWS_DEFAULT_REGION`, and standard AWS credentials (env vars,
+`~/.aws/credentials`, or an IAM role — the last is what
+[`deploy/README.md`](../deploy/README.md)'s App Runner runbook sets up).
+
+*Picking a working `BEDROCK_MODEL_ID` on a shared/restricted account:* newer
+Claude models (Sonnet 5, Haiku 4.5, ...) are **inference-profile-only** —
+Bedrock rejects the bare model ID with `ValidationException: ... isn't
+supported ... Retry ... with the ID or ARN of an inference profile`, and the
+profile ID (`aws bedrock list-inference-profiles`, e.g.
+`global.anthropic.claude-haiku-4-5-...`) needs its own
+`bedrock:InvokeModel` grant, separate from the underlying model's. On a
+shared account where you don't control IAM, the classic on-demand models
+(e.g. `anthropic.claude-3-haiku-20240307-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`)
+are far more likely to already be invocable — `racik/bedrock_converse.py`'s
+`AccessDeniedException`/`ValidationException` handling in `chat()` reports
+which of the two problems you hit.
+
+**`bedrock-sealion-import` (only if you specifically need SEA-LION on
+Bedrock).** SEA-LION is not a native Bedrock foundation model; it reaches
+Bedrock through **Custom Model Import**, which `BedrockSeaLionClient` (below)
+speaks to. Narrower and slower to set up than the Converse path above, and
+carries the constraints below — worth it only if SEA-LION's Southeast-Asian
+language training specifically matters for your deployment.
+
+Constraints on the Custom Model Import path, verified against AWS
+documentation rather than assumed:
 
 - **Tool calling is not guaranteed.** AWS documents tool calling for imported
   models in the GPT-OSS context, and the Converse API is explicitly unsupported
@@ -297,18 +400,23 @@ dozen separate uploads named some variant of "Tempe Mendoan"; constraining on
 | `racik/i18n.py` | Bilingual strings for server-written prose |
 | `racik/translate.py` | SEA-LION dish-name glossing, cached, with offline fallback |
 | `racik/report.py` | The printable compliance + procurement document |
-| `racik/bedrock.py` | Bedrock Custom Model Import provider + deployment preflight |
+| `racik/bedrock.py` | Bedrock Custom Model Import provider + `make_client()` factory |
+| `racik/bedrock_converse.py` | Standard Bedrock foundation models via the Converse API |
 | `racik/urt.py` | Household measures → grams, with per-rule provenance |
 | `racik/tkpi.py` | TKPI 2020 loader, BDD, aliases, token-set matching |
 | `racik/nutrition.py` | Recipe → costed per-portion dish |
 | `racik/prices.py` | Rp/kg table, fallback ladder, live-price adapter |
 | `racik/optimizer.py` | CP-SAT menu selection with soft floors |
 | `racik/procurement.py` | Menu → aggregated shopping list |
-| `racik/store.py` | SQLite read layer |
+| `racik/store.py` | SQLite read layer (racik.db, read-only) |
+| `racik/statedb.py` | SQLite state layer (racik_state.db): runs, operator review, menu history, stock/audit |
+| `racik/agents.py` | Agen Gizi, Agen Biaya, and the deterministic Validator |
+| `racik/serialize.py` | Plan → JSON, shared by `/api/plan` and the generate() pipeline |
 | `racik/sealion.py` | SEA-LION client: auth, rate limiting, tool-call parsing |
-| `racik/orchestrator.py` | Tool definitions, bounded agent loop, fallback parser |
-| `racik/api.py` | FastAPI endpoints + static UI host |
-| `ui/index.html` | Planner interface (Indonesian) |
+| `racik/orchestrator.py` | Tool definitions, bounded agent loop, fallback parser, generate() pipeline |
+| `racik/api.py` | FastAPI endpoints + static hosting for the root frontend and `/legacy` |
+| `ui/index.html` | Plainer Indonesian-language reference UI, mounted at `/legacy` |
+| `../index.html`, `../css/`, `../js/` | The styled operator frontend, served at `/` |
 | `scripts/build_db.py` | ETL |
 | `scripts/package.py` | Builds the ID and EN release archives |
 | `docs/CODE_MAP.md` | Guided reading order for the codebase |
@@ -328,6 +436,10 @@ dozen separate uploads named some variant of "Tempe Mendoan"; constraining on
 | `POST /api/candidates` | The pre-filter rubric and its funnel, per tray slot |
 | `POST /api/translate` | Indonesian dish names glossed to English |
 | `POST /api/report` | Printable compliance + procurement document |
+| `POST /api/generate` | Preprocessing → Agen Gizi → Agen Biaya → CP-SAT → Validator; persists the run |
+| `POST /api/review` | Operator accept/reject + reason for one day; `replace:true` re-solves it |
+| `GET /api/history` | Recently served dishes (menu history) and rejection reasons |
+| `POST /api/stock`, `GET /api/stock` | Stock/actual-cost audit records for a run |
 
 Every `POST` endpoint accepts `"lang": "id"` or `"lang": "en"`.
 
@@ -344,7 +456,7 @@ curl -s localhost:8000/api/plan -H 'Content-Type: application/json' \
 python -m pytest tests -q
 ```
 
-137 tests. The engine suite covers number/unit parsing, the `ons = 100 g`
+182 tests. The engine suite covers number/unit parsing, the `ons = 100 g`
 convention, the ayam/bayam substring trap, alias-code integrity, BDD purchase
 weights, oil absorption, slot classification, soft-floor behaviour under an
 impossible budget, and variety constraints.
@@ -354,6 +466,14 @@ SEA-LION — no API key or network needed — and asserts that tool results are 
 back to the model, the step cap holds against a model that only ever calls
 tools, repeated calls are short-circuited, unknown tools and bad arguments are
 reported rather than raised, and the fallback path still returns real numbers.
+
+`test_agents.py`, `test_statedb.py`, `test_bedrock_converse.py` and
+`test_pipeline.py` cover Agen Gizi/Agen Biaya's rule-based and scripted-LLM
+paths, the Validator, the operator-state persistence layer, the Bedrock
+Converse message/tool-schema translation (mocked, no live AWS calls), and
+`/api/generate`/`/api/review`/`/api/history`/`/api/stock` end to end —
+including that menu history actually keeps a repeated `/api/generate` call
+from re-serving the same dishes.
 
 ## Sources
 

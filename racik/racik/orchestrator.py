@@ -24,14 +24,34 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from .agents import agent_biaya, agent_gizi, validate_plan
 from .akg import BINDING_NUTRIENTS, NUTRIENT_META, SCHOOL_STAGES, STAGE_LABELS, stage_band
 from .config import MBG, SLOTS, MBGConfig
 from .i18n import DEFAULT_LANG, LANG_NAMES, norm_lang, t
+from .nutrition import COMPONENT_ID_BASE
 from .optimizer import MenuOptimizer, PlanRequest, PlanResult
+from .prices import PriceTable
 from .procurement import aggregate, totals
 from .sealion import (ORCHESTRATOR_MODEL, ChatResult, SeaLionClient,
                       SeaLionError, SeaLionNotConfigured, ToolCall)
+from .serialize import serialise_plan
+from .statedb import StateStore
 from .store import RacikStore
+
+
+class RacikGenerateError(RuntimeError):
+    """The generate()/replace_day() pipeline could not produce a plan.
+
+    Carries `run_id`/`trace` when a run was persisted before the failure
+    (an infeasible solve still deserves an auditable record of what Agen
+    Gizi/Agen Biaya decided), so the caller can surface both.
+    """
+
+    def __init__(self, message: str, run_id: Optional[int] = None,
+                 trace: Optional[list[dict]] = None):
+        super().__init__(message)
+        self.run_id = run_id
+        self.trace = trace or []
 
 MAX_STEPS = 6
 MAX_REPEATED_CALLS = 2
@@ -278,6 +298,21 @@ class OrchestratorResult:
         }
 
 
+@dataclass
+class GenerateResult:
+    """The result of the deterministic generate() pipeline: preprocessing ->
+    Agen Gizi -> Agen Biaya -> CP-SAT -> Validator -> persisted menu plan."""
+
+    run_id: int
+    plan: dict
+    trace: list[dict]
+    resolved: dict
+
+    def to_dict(self) -> dict:
+        return {"run_id": self.run_id, "plan": self.plan,
+                "trace": self.trace, "resolved": self.resolved}
+
+
 # ---------------------------------------------------------------- orchestrator
 
 
@@ -286,11 +321,15 @@ class RacikOrchestrator:
 
     def __init__(self, store: RacikStore, optimizer: MenuOptimizer,
                  client: Optional[SeaLionClient] = None,
-                 max_steps: int = MAX_STEPS):
+                 max_steps: int = MAX_STEPS,
+                 price_table: Optional[PriceTable] = None):
         self.store = store
         self.optimizer = optimizer
         self.client = client or SeaLionClient()
         self.max_steps = max_steps
+        # Real per-province market data (WFP retail survey) for Agen Biaya —
+        # see agents.py's regional_cost_index handling.
+        self.price_table = price_table or PriceTable.load()
         self._plan_cache: dict[str, PlanResult] = {}
         self._last_plan_payload: Optional[dict] = None
         self._translator = None
@@ -509,7 +548,8 @@ class RacikOrchestrator:
         config = MBGConfig(
             budget_per_portion_idr=float(budget_per_portion_idr
                                          or MBG.budget_per_portion_idr),
-            ingredient_budget_share=MBG.ingredient_budget_share)
+            ingredient_budget_share=MBG.ingredient_budget_share,
+            regional_cost_index=self.price_table.regional_index_for(province))
         request = PlanRequest(
             stage=stage if stage in SCHOOL_STAGES else "sd",
             province=province,
@@ -549,6 +589,7 @@ class RacikOrchestrator:
             ingredient_budget_share=float(ingredient_budget_share
                                           if ingredient_budget_share is not None
                                           else MBG.ingredient_budget_share),
+            regional_cost_index=self.price_table.regional_index_for(province),
         )
         island = self.store.island_of(province) if province else ""
         request = PlanRequest(
@@ -565,6 +606,223 @@ class RacikOrchestrator:
         if key not in self._plan_cache:
             self._plan_cache[key] = self.optimizer.solve(request)
         return self._plan_cache[key]
+
+    # ------------------------------------------------------------ generate pipeline
+    def generate(self, *, days: int, portions: int, province: str,
+                stage: Optional[str], budget_mode: str, budget_value: float,
+                notes_text: str, exclude_dish_ids: Optional[list[int]] = None,
+                history_days: int = 14, lang: str = DEFAULT_LANG,
+                state: StateStore) -> GenerateResult:
+        """Preprocessing -> Agen Gizi -> Agen Biaya -> CP-SAT -> Validator ->
+        persisted menu plan (workflow-diagram stages 2-6).
+
+        Sequencing is fixed in code, not left to a model's tool choice, so a
+        live demo reliably exercises every stage on every call — the same
+        "bounded in code, not in the prompt" discipline the ask() loop above
+        already applies to its step cap.
+        """
+        lang = norm_lang(lang)
+        days = max(1, min(int(days or 5), 7))
+        portions = max(1, int(portions or 100))
+        province_r = _closest_province(province, self._provinces)
+        island = self.store.island_of(province_r) if province_r else ""
+
+        # Budget-mode arithmetic is plain code, never an agent's job — see
+        # agents.py's module docstring on the "never calculates" invariant.
+        budget_value = float(budget_value or MBG.budget_per_portion_idr)
+        budget_per_portion = (budget_value / max(portions * days, 1)
+                              if budget_mode == "total" else budget_value)
+
+        trace: list[dict] = [{
+            "agent": "preprocessing", "source": "deterministic",
+            "rationale": f"Candidate pool narrowed by gates G1-G5 for "
+                         f"{province_r or 'no regional preference'}.",
+            "params": {"province": province_r, "island": island},
+        }]
+
+        # The operator's past reject decisions — "the feedback for the AI
+        # model to learn from" (see the workflow diagram's operator-review ->
+        # solver feedback arrow). Passed to Agen Gizi so its rationale names
+        # what it's reacting to, and hard-excluded below regardless of what
+        # either agent decides, so a rejected dish never silently resurfaces.
+        feedback = state.rejected_dishes(limit=20)
+
+        gizi = agent_gizi(self.client, stage_hint=stage, notes_text=notes_text,
+                          feedback_history=feedback, lang=lang)
+        trace.append(gizi.to_dict())
+
+        biaya = agent_biaya(self.client, budget_per_portion_idr=budget_per_portion,
+                            portions=portions, province=province_r,
+                            price_table=self.price_table, lang=lang)
+        trace.append(biaya.to_dict())
+
+        resolved_stage = gizi.params.get("stage") or (
+            stage if stage in SCHOOL_STAGES else "sd")
+        config = MBGConfig(
+            budget_per_portion_idr=budget_per_portion,
+            ingredient_budget_share=biaya.params.get(
+                "ingredient_budget_share", MBG.ingredient_budget_share),
+            regional_cost_index=biaya.params.get("regional_cost_index", 1.0),
+        )
+
+        recent_ids = (state.recent_served_dish_ids(within_days=history_days)
+                     if history_days > 0 else set())
+        rejected_ids = {int(f["dish_id"]) for f in feedback}
+        exclude_ids = {int(i) for i in (exclude_dish_ids or [])} | recent_ids | rejected_ids
+
+        resolved = {
+            "stage": resolved_stage, "province": province_r, "island": island,
+            "budget_per_portion_idr": config.budget_per_portion_idr,
+            "ingredient_budget_share": config.ingredient_budget_share,
+            "regional_cost_index": config.regional_cost_index,
+            "exclude_terms": list(gizi.params.get("exclude_terms", [])),
+            "enforce_micronutrients": bool(gizi.params.get(
+                "enforce_micronutrients", False)),
+            "portions": portions,
+        }
+        request = PlanRequest(
+            days=days, stage=resolved_stage, portions=portions,
+            province=province_r, island=island, config=config,
+            exclude_terms=resolved["exclude_terms"],
+            exclude_dish_ids=list(exclude_ids),
+            enforce_micronutrients=resolved["enforce_micronutrients"],
+            max_solve_seconds=12.0,
+        )
+        result = self.optimizer.solve(request)
+        cp_sat_note = ""
+
+        # Menu-history rotation (recent_ids) is a preference, not a hard
+        # requirement — it should never be the reason a plan can't be built
+        # at all. A tight budget can genuinely exhaust a small candidate
+        # pool after enough regenerations; retry once without the decay
+        # window (explicit vetoes and this run's own rejected-dish exclusion
+        # stay in force) before reporting infeasible.
+        if not result.feasible and recent_ids:
+            narrower_ids = rejected_ids | {int(i) for i in (exclude_dish_ids or [])}
+            retry_request = PlanRequest(
+                days=days, stage=resolved_stage, portions=portions,
+                province=province_r, island=island, config=config,
+                exclude_terms=resolved["exclude_terms"],
+                exclude_dish_ids=list(narrower_ids),
+                enforce_micronutrients=resolved["enforce_micronutrients"],
+                max_solve_seconds=12.0,
+            )
+            retried = self.optimizer.solve(retry_request)
+            if retried.feasible:
+                result = retried
+                cp_sat_note = (f" Retried without the {history_days}-day "
+                               f"rotation window (kept explicit vetoes) after "
+                               f"the first attempt found no candidates.")
+
+        trace.append({
+            "agent": "cp_sat", "source": "solver",
+            "rationale": (
+                f"{result.status}: {result.candidates_considered} candidates "
+                f"considered, solved in {result.solve_seconds:.2f}s.{cp_sat_note}"
+                if result.feasible else
+                f"{result.status}: no feasible menu under these constraints."),
+            "params": {"status": result.status,
+                       "candidates_considered": result.candidates_considered,
+                       "solve_seconds": round(result.solve_seconds, 2)},
+        })
+
+        if not result.feasible:
+            run_id = state.record_run(stage=resolved_stage, days=days,
+                                      portions=portions, province=province_r,
+                                      resolved=resolved, trace=trace)
+            raise RacikGenerateError(
+                f"no menu could be built (solver status: {result.status})",
+                run_id=run_id, trace=trace)
+
+        validator = validate_plan(result, lang=lang)
+        trace.append(validator.to_dict())
+
+        plan_payload = serialise_plan(result, lang=lang)
+        plan_payload["procurement"] = self._procurement_payload(result)
+        run_id = state.record_run(stage=resolved_stage, days=days,
+                                  portions=portions, province=province_r,
+                                  resolved=resolved, trace=trace)
+        self._persist_served(state, run_id, result)
+        plan_payload["run_id"] = run_id
+
+        return GenerateResult(run_id=run_id, plan=plan_payload, trace=trace,
+                              resolved=resolved)
+
+    def replace_day(self, *, run_id: int, day_index: int,
+                    lang: str = DEFAULT_LANG, state: StateStore) -> dict:
+        """Solve a one-day replacement for a rejected day, excluding whatever
+        was served on it — "operator review" feeding back into the CP-SAT
+        solver, per the workflow diagram's arrow from review to the solver.
+        """
+        lang = norm_lang(lang)
+        run = state.run(run_id)
+        if run is None:
+            raise RacikGenerateError(f"run {run_id} not found")
+        resolved = run["resolved"]
+
+        rejected_ids = {
+            row["dish_id"] for row in state.recent_served(limit=1000)
+            if row["run_id"] == run_id and row["day_index"] == day_index
+        }
+        exclude_ids = rejected_ids | state.recent_served_dish_ids(within_days=14)
+
+        config = MBGConfig(
+            budget_per_portion_idr=resolved["budget_per_portion_idr"],
+            ingredient_budget_share=resolved["ingredient_budget_share"],
+            regional_cost_index=resolved.get("regional_cost_index", 1.0),
+        )
+        request = PlanRequest(
+            days=1, stage=resolved["stage"], portions=run["portions"],
+            province=resolved["province"], island=resolved.get("island", ""),
+            config=config, exclude_terms=resolved.get("exclude_terms", []),
+            exclude_dish_ids=list(exclude_ids),
+            enforce_micronutrients=resolved.get("enforce_micronutrients", False),
+            max_solve_seconds=10.0,
+        )
+        result = self.optimizer.solve(request)
+        if not result.feasible:
+            raise RacikGenerateError(
+                f"no replacement menu could be built (status: {result.status})")
+
+        day_payload = serialise_plan(result, lang=lang)["days"][0]
+        day_payload["index"] = day_index      # report under the original day's slot
+        day_payload["procurement"] = self._procurement_payload(result)["by_day"][0]
+        self._persist_served(state, run_id, result, day_index_override=day_index)
+        return day_payload
+
+    def _procurement_payload(self, result: PlanResult) -> dict:
+        """Shopping-list totals for the whole run, plus a per-day breakdown —
+        computed straight from the already-solved `PlanResult` so it can
+        never disagree with the dishes the operator is looking at, unlike a
+        separate /api/procurement call that would re-solve from scratch."""
+        whole_run = aggregate(result, self.store)
+        return {
+            "totals": totals(whole_run),
+            "lines": [line.to_dict() for line in whole_run],
+            "by_day": [
+                {
+                    "day_index": day.day_index,
+                    "totals": totals(aggregate(result, self.store,
+                                               day_indexes=[day.day_index])),
+                    "lines": [line.to_dict() for line in aggregate(
+                        result, self.store, day_indexes=[day.day_index])],
+                }
+                for day in result.days
+            ],
+        }
+
+    @staticmethod
+    def _persist_served(state: StateStore, run_id: int, result: PlanResult,
+                        day_index_override: Optional[int] = None) -> None:
+        """Log real (non-synthetic) dishes to the served log — Menu history."""
+        entries = []
+        for day in result.days:
+            day_index = day_index_override if day_index_override is not None else day.day_index
+            for slot, dish_ in day.dishes.items():
+                if dish_ is not None and dish_.dish_id < COMPONENT_ID_BASE:
+                    entries.append((day_index, slot, dish_.dish_id, dish_.name))
+        if entries:
+            state.record_served(run_id, entries)
 
     # ------------------------------------------------------------ no-model paths
     @staticmethod

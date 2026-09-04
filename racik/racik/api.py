@@ -16,15 +16,17 @@ from pydantic import BaseModel, Field
 
 from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
                   SCHOOL_STAGES, STAGE_LABELS, stage_band)
-from .config import (MBG, PROJECT_DIR, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS,
-                     UI_DIR, MBGConfig)
-from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang, t, unit
-from .optimizer import MenuOptimizer, PlanRequest, PlanResult
-from .orchestrator import TOOL_SCHEMAS, RacikOrchestrator
+from .config import (FRONTEND_DIR, MBG, PROJECT_DIR, SLOT_LABELS_EN,
+                     SLOT_LABELS_ID, SLOTS, UI_DIR, MBGConfig)
+from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang
+from .optimizer import MenuOptimizer, PlanRequest
+from .orchestrator import TOOL_SCHEMAS, RacikGenerateError, RacikOrchestrator
 from .procurement import aggregate, totals
-from .report import build_report, plan_notes
+from .report import build_report
+from .serialize import serialise_plan
 from .bedrock import make_client
 from .sealion import SeaLionClient
+from .statedb import StateStore
 from .store import RacikStore
 from .translate import DishTranslator
 
@@ -32,10 +34,6 @@ app = FastAPI(title="Racik", version="0.1.0",
               description="AKG-grounded MBG menu planning for Indonesia")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
-
-DAY_LABELS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
-DAY_LABELS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-                 "Saturday", "Sunday"]
 
 
 @lru_cache(maxsize=1)
@@ -46,6 +44,11 @@ def _store() -> RacikStore:
 @lru_cache(maxsize=1)
 def _optimizer() -> MenuOptimizer:
     return MenuOptimizer(_store().load_dishes())
+
+
+@lru_cache(maxsize=1)
+def _state() -> StateStore:
+    return StateStore()
 
 
 # ---------------------------------------------------------------- schemas
@@ -138,7 +141,7 @@ def plan(body: PlanBody) -> dict:
     if not result.feasible:
         raise HTTPException(
             422, f"no menu could be built (solver status: {result.status})")
-    return _serialise(result, norm_lang(body.lang))
+    return serialise_plan(result, norm_lang(body.lang))
 
 
 @app.get("/api/dish/{dish_id}")
@@ -257,15 +260,24 @@ class AskBody(BaseModel):
 
 @app.get("/api/orchestrator")
 def orchestrator_status() -> dict:
-    """Which model is driving, and whether it is reachable."""
+    """Which model is driving, and whether it is reachable.
+
+    `describe()`'s own "provider" field already names which of the five
+    supported providers (openai/anthropic/bedrock/bedrock-sealion-import/
+    sealion) is live — "mode" here is deliberately provider-agnostic rather
+    than a second, easily-stale label for the same fact.
+    """
     client = _orchestrator().client
     return {
         **client.describe(),
         "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
         "max_steps": _orchestrator().max_steps,
-        "mode": "sealion" if client.configured else "fallback",
-        "hint": ("Set SEALION_API_KEY to enable SEA-LION orchestration; "
-                 "without it Racik answers with a rule-based planner."),
+        "mode": "llm" if client.configured else "fallback",
+        "hint": ("Racik is answering with a rule-based planner, not an LLM. "
+                 "Set RACIK_LLM_PROVIDER plus the matching credentials "
+                 "(see racik/README.md's 'Choosing an LLM provider') to "
+                 "enable one." if not client.configured else
+                 f"Live via {client.describe()['provider']}."),
     }
 
 
@@ -281,91 +293,138 @@ def ask(body: AskBody) -> dict:
     return result.to_dict()
 
 
-# ---------------------------------------------------------------- serialise
+# ---------------------------------------------------------------- generate pipeline
+#
+# The workflow the operator actually drives from the styled frontend:
+# preprocessing -> Agen Gizi -> Agen Biaya -> CP-SAT -> Validator -> menu plan,
+# with the result persisted so Operator review and Menu history (below) have
+# something to act on. See orchestrator.RacikOrchestrator.generate().
 
 
-def _serialise(result: PlanResult, lang: str = DEFAULT_LANG) -> dict:
-    store = _store()
-    portions = result.request.portions
-    targets = result.targets
+class GenerateBody(BaseModel):
+    days: int = Field(5, ge=1, le=7)
+    portions: int = Field(100, ge=1, le=100_000)
+    province: str = ""
+    stage: str = ""                     # "" = let Agen Gizi infer (defaults to "sd")
+    budget_mode: str = "total"          # "total" | "per_portion"
+    budget_value: float = Field(MBG.budget_per_portion_idr, gt=0)
+    notes: str = ""                     # free-text allergy/preference notes
+    exclude_dish_ids: list[int] = []    # operator vetoes carried from a prior run
+    history_days: int = Field(14, ge=0, le=60)   # rotation/decay window
+    lang: str = DEFAULT_LANG
 
-    days = []
-    for day in result.days:
-        slots = {}
-        for slot in SLOTS:
-            dish_ = day.dishes[slot]
-            slots[slot] = None if dish_ is None else {
-                **dish_.to_dict(),
-                "main_food": dish_.main_food_name,
-                "cost_total_idr": round(dish_.cost_per_portion_idr * portions),
-                "steps": [s.strip() for s in (dish_.steps or "").split(".")
-                          if s.strip()][:8],
-            }
-        days.append({
-            "index": day.day_index,
-            "label_id": DAY_LABELS[day.day_index % 7],
-            "label_en": DAY_LABELS_EN[day.day_index % 7],
-            "cost_per_portion_idr": round(day.cost_per_portion_idr),
-            "cost_total_idr": round(day.cost_per_portion_idr * portions),
-            "adequacy": round(result.adequacy(day), 3),
-            "nutrients": {k: round(v, 2) for k, v in day.nutrients.items()},
-            "compliance": _compliance(day.nutrients, targets, lang),
-            "slots": slots,
-        })
 
+@app.post("/api/generate")
+def generate(body: GenerateBody) -> dict:
+    if body.budget_mode not in ("total", "per_portion"):
+        raise HTTPException(400, "budget_mode must be 'total' or 'per_portion'")
+    try:
+        result = _orchestrator().generate(
+            days=body.days, portions=body.portions, province=body.province,
+            stage=body.stage or None, budget_mode=body.budget_mode,
+            budget_value=body.budget_value, notes_text=body.notes,
+            exclude_dish_ids=body.exclude_dish_ids,
+            history_days=body.history_days, lang=norm_lang(body.lang),
+            state=_state())
+    except RacikGenerateError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return result.to_dict()
+
+
+# ---------------------------------------------------------------- operator review
+
+
+class ReviewBody(BaseModel):
+    run_id: int
+    day_index: int
+    decision: str            # "accept" | "reject"
+    reason: str = ""
+    replace: bool = False    # solve a one-day replacement for a rejected day
+    lang: str = DEFAULT_LANG
+
+
+@app.post("/api/review")
+def review(body: ReviewBody) -> dict:
+    """Persist an accept/reject decision. A reject can ask for a same-day
+    replacement, solved with the rejected dish excluded — "operator review"
+    feeding straight back into the CP-SAT solver, per the workflow diagram."""
+    if body.decision not in ("accept", "reject"):
+        raise HTTPException(400, "decision must be 'accept' or 'reject'")
+    state = _state()
+    state.record_review(body.run_id, body.day_index, body.decision, body.reason)
+    response: dict = {"ok": True}
+    if body.decision == "reject" and body.replace:
+        try:
+            response["replacement_day"] = _orchestrator().replace_day(
+                run_id=body.run_id, day_index=body.day_index,
+                lang=norm_lang(body.lang), state=state)
+        except RacikGenerateError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    return response
+
+
+@app.get("/api/history")
+def history(limit: int = 30) -> dict:
+    """Recently served dishes (menu history / rotation) and rejection reasons
+    (feedback the Settings tab shows, and Agen Gizi reads on the next run)."""
+    state = _state()
     return {
-        "summary": result.summary(),
-        "band": {"key": result.band.key, "label_id": result.band.label_id,
-                 "label_en": result.band.label_en},
-        "targets": {k: round(v, 1) for k, v in targets.items()},
-        "days": days,
-        "relaxations": [
-            {"day": r.day_index, "nutrient": r.nutrient,
-             "label_id": NUTRIENT_META[r.nutrient][0],
-             "label_en": NUTRIENT_META[r.nutrient][1],
-             "unit": unit(lang, NUTRIENT_META[r.nutrient][2]),
-             "shortfall": round(r.shortfall, 2), "target": round(r.target, 2),
-             "share": round(r.share, 3)}
-            for r in result.relaxations
-        ],
-        "notes": _notes(result, lang),
-        "lang": lang,
+        "recent_served": state.recent_served(limit=limit),
+        "rejections": state.rejection_log(limit=limit),
     }
 
 
-def _compliance(nutrients: dict, targets: dict,
-                lang: str = DEFAULT_LANG) -> list[dict]:
-    """Per-nutrient attainment, keeping verified and advisory values apart."""
-    rows = []
-    for key, (label_id, label_en, unit_symbol, status) in NUTRIENT_META.items():
-        target = targets.get(key)
-        if not target:
-            continue
-        value = nutrients.get(key, 0.0)
-        rows.append({
-            "key": key, "label_id": label_id, "label_en": label_en,
-            "unit": unit(lang, unit_symbol), "value": round(value, 1),
-            "target": round(target, 1),
-            "pct": round(value / target * 100),
-            "binding": key in BINDING_NUTRIENTS,
-            "verified": status == "verified",
-        })
-    return rows
+# ---------------------------------------------------------------- stock & audit
 
 
-def _notes(result: PlanResult, lang: str = DEFAULT_LANG) -> list[str]:
-    """Delegates to report.plan_notes so both surfaces say the same thing."""
-    return plan_notes(result, lang)
+class StockBody(BaseModel):
+    run_id: int
+    day_index: int
+    ingredient_name: str
+    received_pct: Optional[float] = Field(None, ge=0, le=200)
+    used_pct: Optional[float] = Field(None, ge=0, le=200)
+    actual_cost_idr: Optional[float] = Field(None, ge=0)
+    note: Optional[str] = None
+
+
+@app.post("/api/stock")
+def stock_upsert(body: StockBody) -> dict:
+    _state().upsert_stock(
+        body.run_id, body.day_index, body.ingredient_name,
+        received_pct=body.received_pct, used_pct=body.used_pct,
+        actual_cost_idr=body.actual_cost_idr, note=body.note)
+    return {"ok": True}
+
+
+@app.get("/api/stock")
+def stock_list(run_id: int) -> dict:
+    return {"run_id": run_id, "records": _state().stock_for_run(run_id)}
 
 
 # ---------------------------------------------------------------- static UI
+#
+# The styled operator frontend (root index.html/css/js) is the primary UI;
+# the plainer Indonesian reference implementation stays reachable at /legacy.
 
-if UI_DIR.exists():
-    app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
+if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
+    if (FRONTEND_DIR / "css").exists():
+        app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"),
+                 name="frontend-css")
+    if (FRONTEND_DIR / "js").exists():
+        app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"),
+                 name="frontend-js")
 
     @app.get("/")
     def index() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "index.html")
+
+elif UI_DIR.exists():
+    @app.get("/")
+    def index() -> FileResponse:
         return FileResponse(UI_DIR / "index.html")
+
+if UI_DIR.exists():
+    app.mount("/legacy", StaticFiles(directory=UI_DIR, html=True), name="legacy-ui")
 
 
 _ARCHITECTURE_SVG = PROJECT_DIR / "docs" / "architecture.svg"
