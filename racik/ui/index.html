@@ -499,7 +499,8 @@ const STRINGS = {
     "review.prompt": "Tandai apakah menu ini siap dimasak, atau tolak dan beri tahu alasannya.",
     "review.accept": "Terima",
     "review.reject": "Tolak",
-    "review.acceptedNote": "Ditandai siap dimasak untuk tampilan ini — tanda ini akan hilang jika Anda menyusun ulang.",
+    "review.acceptedNote": "Ditandai siap dimasak.",
+    "review.acceptSaved": "Tercatat di log peninjauan — bukti bahwa menu ini sudah diperiksa dan disetujui.",
     "review.rejectedNote": "Ditolak — pilih alasannya di bawah.",
     "review.pickReason": "Pilih alasan penolakan:",
     "review.saved": "Tercatat — dipertimbangkan pada susun ulang berikutnya.",
@@ -683,7 +684,8 @@ const STRINGS = {
     "review.prompt": "Mark this menu ready to cook, or reject it and say why.",
     "review.accept": "Accept",
     "review.reject": "Reject",
-    "review.acceptedNote": "Marked ready to cook for this view — this mark clears if you rebuild the menu.",
+    "review.acceptedNote": "Marked ready to cook.",
+    "review.acceptSaved": "Recorded in the review log — proof this menu was checked and approved.",
     "review.rejectedNote": "Rejected — pick a reason below.",
     "review.pickReason": "Pick a reason for rejecting:",
     "review.saved": "Recorded — will be weighed in the next rebuild.",
@@ -1344,11 +1346,13 @@ function renderDay(day){
 
 /** Coarse, whole-day feedback — "is this day's menu ready to cook, or not" —
  * separate from the per-dish star widget above it (which is about whether
- * kids liked something they already ate). Accept is a local acknowledgement,
- * nothing to persist. Reject asks why (the same reason categories main
- * branch's chips offered) and, once picked, writes that reason against every
- * dish in the day via /api/rate + /api/rate/reason: a real signal for the
- * next solve's recency weighting, not just a note that sits unread. */
+ * kids liked something they already ate). Both Accept and Reject write to
+ * the feedback log (/api/rate/reason) so there's a real audit trail of
+ * which days an operator actually reviewed and approved before serving —
+ * the kind of record a government feeding program needs for compliance,
+ * not just a UX nicety. Only Reject's "kids_disliked" reason also calls
+ * /api/rate: an approval isn't a taste rating (the star widget already
+ * covers that, after the fact), so Accept never touches dish rotation. */
 let DAY_REVIEW = {};   // day.index -> {status, reason, saving, saved, failed}
 const REJECT_REASONS = [
   ["too_expensive", "fb.tooExpensive"], ["not_regional", "fb.notRegional"],
@@ -1356,6 +1360,7 @@ const REJECT_REASONS = [
   ["other", "fb.other"],
 ];
 const REJECT_RATING = 2;   // a representative "didn't work" value for the log/weighting
+const ACCEPT_LOG_RATING = 3;   // neutral placeholder for the log schema — RATING_MULTIPLIER[3] is already "neutral" everywhere else in this codebase
 
 function renderDayReview(day){
   const box = el("dayReview");
@@ -1365,7 +1370,10 @@ function renderDayReview(day){
        data-reason="${key}">${esc(t(label))}</button>`).join("");
   const statusMsg = state.status === "accepted" ? t("review.acceptedNote")
     : state.status === "rejected" ? t("review.rejectedNote") : t("review.prompt");
-  const saveMsg = state.status !== "rejected" ? ""
+  const saveMsg = state.status === "accepted"
+    ? (state.saving ? "…" : state.failed ? t("review.failed")
+       : state.saved ? t("review.acceptSaved") : "")
+    : state.status !== "rejected" ? ""
     : !state.reason ? t("review.pickReason")
     : state.saving ? "…" : state.failed ? t("review.failed")
     : state.saved ? t(state.affectsRotation ? "review.saved" : "review.loggedOnly") : "";
@@ -1384,18 +1392,34 @@ function renderDayReview(day){
       </div>
     </div>
     ${state.status === "rejected" ? `<div class="reason-chips">${chips}</div>
-      <div class="hint" style="margin-top:8px">${esc(saveMsg)}</div>` : ""}`;
+      <div class="hint" style="margin-top:8px">${esc(saveMsg)}</div>` : ""}
+    ${state.status === "accepted" && saveMsg ? `<div class="hint" style="margin-top:8px">${esc(saveMsg)}</div>` : ""}`;
 
-  el("reviewAccept").onclick = () => {
-    DAY_REVIEW[day.index] = {status: "accepted"};
-    renderDayReview(day);
-  };
+  el("reviewAccept").onclick = () => submitDayAccept(day);
   el("reviewReject").onclick = () => {
     DAY_REVIEW[day.index] = {...state, status: "rejected"};
     renderDayReview(day);
   };
   box.querySelectorAll(".reason-chip").forEach(chip =>
     chip.onclick = () => submitDayReject(day, chip.dataset.reason));
+}
+
+async function submitDayAccept(day){
+  DAY_REVIEW[day.index] = {status: "accepted", saving: true};
+  renderDayReview(day);
+  const dishes = Object.values(day.slots).filter(Boolean);
+  try{
+    await Promise.all(dishes.map(dish => fetch(API + "/api/rate/reason", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({dish_id: dish.dish_id, rating: ACCEPT_LOG_RATING,
+        province: LAST_BODY.province, stage: LAST_BODY.stage,
+        dish_name: dish.name, reason: "accepted"})
+    })));
+    DAY_REVIEW[day.index] = {status: "accepted", saved: true};
+  }catch(err){
+    DAY_REVIEW[day.index] = {status: "accepted", failed: true};
+  }
+  renderDayReview(day);
 }
 
 // Only a taste complaint should push a dish out of rotation — "too

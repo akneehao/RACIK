@@ -293,6 +293,68 @@ def test_propose_recipe_reaches_a_full_agent_loop(store, optimizer):
     assert payload["draft"]["cost_per_portion_idr"] > 0
 
 
+# ---------------------------------------------------------------- narration verification
+
+def test_unverified_numbers_flags_a_figure_not_backed_by_any_tool_result():
+    """The core case this exists for: a number the model typed that never
+    came from a tool at all — this is exactly what the trust story
+    promises never silently happens."""
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {"summary": {
+        "mean_cost_per_portion_idr": 6990}}, 0.1)]
+    flagged = _unverified_numbers(
+        "Biaya per porsi Rp6.990, tapi total belanja Rp999.999.", trace)
+    assert "Rp999.999" in flagged
+    assert "Rp6.990" not in flagged
+
+
+def test_unverified_numbers_tolerates_percentage_narrated_from_a_fraction():
+    """The critical anti-false-positive case: adequacy is stored as a 0-1
+    fraction in every tool payload (e.g. mean_adequacy: 0.968), and every
+    normal, correct answer narrates it as a percentage ("97%"). Without
+    the x100 tolerance this is built with, this single, extremely common
+    pattern would flag nearly every correct answer Racik produces."""
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {
+        "summary": {"mean_adequacy": 0.968}}, 0.1)]
+    assert _unverified_numbers("Pemenuhan AKG rata-rata 97%.", trace) == []
+
+
+def test_unverified_numbers_matches_rupiah_regardless_of_thousands_style():
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {"cost_per_portion_idr": 6990}, 0.1)]
+    assert _unverified_numbers("Biaya per porsi adalah Rp6.990.", trace) == []
+    assert _unverified_numbers("Cost per portion is Rp6,990.", trace) == []
+
+
+def test_unverified_numbers_returns_empty_when_trace_is_empty():
+    """No tool ran — nothing to verify against, and nothing should be
+    flagged as a false accusation of a number with no ground truth to
+    check it against."""
+    from racik.orchestrator import _unverified_numbers
+    assert _unverified_numbers("Biaya sekitar Rp5.000.", []) == []
+
+
+def test_full_agent_loop_surfaces_unverified_numbers(store, optimizer):
+    client = ScriptedSeaLion([
+        _call("plan_menu", stage="sd", days=1, portions=50),
+        ChatResult(content="Biaya per porsi sekitar Rp1.234.567 — sangat terjangkau."),
+    ])
+    result = RacikOrchestrator(store, optimizer, client).ask("buatkan menu")
+    assert result.unverified_numbers  # the solver never produces this figure
+    assert any("1.234.567" in n for n in result.unverified_numbers)
+
+
+def test_fallback_path_never_flags_a_number(store, optimizer):
+    """The rule-based fallback's text is built directly from the same
+    payload it's checked against (see _render_plan_text), so it can never
+    disagree with itself — confirms the check doesn't misfire there."""
+    orch = RacikOrchestrator(store, optimizer, SeaLionClient(api_key=""))
+    result = orch.ask("Menu 2 hari untuk SD, 100 porsi")
+    assert result.mode == "fallback"
+    assert result.unverified_numbers == []
+
+
 # ---------------------------------------------------------------- fallback
 
 def test_fallback_used_when_no_api_key(store, optimizer):

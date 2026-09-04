@@ -320,6 +320,14 @@ class OrchestratorResult:
     steps: int = 0
     stopped_because: str = "completed"
     usage: dict = field(default_factory=dict)
+    # Rupiah amounts / percentages the free-text answer states that don't
+    # trace back to any tool result in this conversation — see
+    # _unverified_numbers(). The trace/plan data is always exactly what a
+    # tool returned; this field is the honest admission that the prose
+    # summary wrapped around it is a well-behaved but *unverified* model
+    # paraphrase, not something the code guarantees correct the way it
+    # guarantees the structured data. A soft signal, not a rejection.
+    unverified_numbers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -327,7 +335,7 @@ class OrchestratorResult:
             "steps": self.steps, "stopped_because": self.stopped_because,
             "trace": [t.to_dict() for t in self.trace],
             "plan": self.plan, "resolved_request": self.resolved_request,
-            "usage": self.usage,
+            "usage": self.usage, "unverified_numbers": self.unverified_numbers,
         }
 
 
@@ -435,6 +443,7 @@ class RacikOrchestrator:
             resolved_request=self._last_resolved_request,
             model=self.client.model, mode="sealion", steps=step,
             stopped_because=stopped, usage=usage_total,
+            unverified_numbers=_unverified_numbers(answer, trace),
         )
 
     def _invoke(self, call: ToolCall, trace: list[ToolInvocation]) -> dict:
@@ -704,6 +713,66 @@ class RacikOrchestrator:
 
 
 # ---------------------------------------------------------------- helpers
+
+
+_RUPIAH_RE = re.compile(r"Rp\.?\s*(\d+(?:[.,]\d+)*)")
+_PERCENT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
+
+
+def _flatten_numbers(obj: object) -> set[float]:
+    """Every numeric leaf value inside a tool result, recursively — the
+    ground truth an answer's stated rupiah/percentage figures should trace
+    back to."""
+    numbers: set[float] = set()
+    if isinstance(obj, bool):
+        return numbers                    # bool is an int subclass; not a figure
+    if isinstance(obj, (int, float)):
+        numbers.add(round(float(obj)))
+        if 0 <= obj <= 2:
+            # A 0-1 fraction (e.g. mean_adequacy: 0.968) is almost always
+            # narrated as a percentage ("97%") — without this, every
+            # ordinary, correct percentage mention would be flagged.
+            numbers.add(round(float(obj) * 100))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            numbers |= _flatten_numbers(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            numbers |= _flatten_numbers(v)
+    return numbers
+
+
+def _unverified_numbers(answer: str, trace: list["ToolInvocation"]) -> list[str]:
+    """Rupiah amounts and percentages the answer states that don't match
+    any number in this conversation's tool results, within ±1 rounding
+    tolerance.
+
+    Deliberately soft and narrow: never blocks or edits the answer, only
+    checks the two figure types most likely to be scrutinised (cost,
+    adequacy). False positives are expected — a reader-obvious derivation
+    like "50 portions x Rp6,976" won't appear verbatim in any tool result
+    either — so this is reported as an honest "could not be matched"
+    admission, never as an accusation of a wrong number.
+    """
+    ground_truth: set[float] = set()
+    for call in trace:
+        ground_truth |= _flatten_numbers(call.result)
+    if not ground_truth:
+        return []
+
+    unmatched: list[str] = []
+    for raw in _RUPIAH_RE.findall(answer):
+        digits = raw.replace(".", "").replace(",", "")
+        if not digits.isdigit():
+            continue
+        n = int(digits)
+        if not any(abs(n - g) <= 1 for g in ground_truth):
+            unmatched.append(f"Rp{raw}")
+    for raw in _PERCENT_RE.findall(answer):
+        n = round(float(raw.replace(",", ".")))
+        if not any(abs(n - g) <= 1 for g in ground_truth):
+            unmatched.append(f"{raw}%")
+    return unmatched
 
 
 def _assistant_turn(reply: ChatResult) -> dict:

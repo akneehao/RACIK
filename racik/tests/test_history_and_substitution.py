@@ -184,6 +184,22 @@ def test_rating_reason_is_logged_separately_and_optional(history):
     assert log[0]["rating"] == 1
 
 
+def test_accept_log_entry_never_touches_the_rating(history):
+    """The frontend's day-review Accept writes an "accepted" reason via the
+    same log_reason() path as a reject reason — never /api/rate — so an
+    approval can never be mistaken for a taste rating and can never bias
+    recency weighting. This is the audit-trail half of day review: proof a
+    day was reviewed and approved, independent of whether kids liked it."""
+    assert history.rating("Jawa Tengah", "sd", 303) is None
+    history.log_reason("Jawa Tengah", "sd", 303, "Nasi Jagung", "accepted", 3)
+    assert history.rating("Jawa Tengah", "sd", 303) is None  # still untouched
+    assert history.recency_weights("Jawa Tengah", "sd") == {}  # no serving, no rating -> no weight
+    log = history.feedback_log("Jawa Tengah", "sd")
+    assert len(log) == 1
+    assert log[0]["reason"] == "accepted"
+    assert log[0]["dish_id"] == 303
+
+
 def test_feedback_log_scopes_and_orders_most_recent_first(history):
     history.log_reason("Jawa Tengah", "sd", 1, "A", "too_expensive", 1)
     history.log_reason("Jawa Tengah", "sd", 2, "B", "kids_disliked", 2)
