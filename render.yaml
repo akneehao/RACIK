@@ -1,0 +1,34 @@
+# Render Blueprint for Racik. On Render's dashboard: New + -> Blueprint ->
+# connect the valeskhakc/RACIK repo -> Render reads this file and proposes
+# the service below. Secret values (marked sync: false) are entered once in
+# Render's own dashboard, never committed here.
+#
+# Known limitation carried over from the Dockerfile: racik_state.db (operator
+# reviews, menu history, feedback log) lives on the container's local disk.
+# On Render's free/starter plans that disk is ephemeral, so state resets on
+# every redeploy and isn't shared if the service ever scales past one
+# instance. Fine for a demo; a real production deploy needs that store
+# moved to a managed Postgres (Render offers this) or similar.
+
+services:
+  - type: web
+    name: racik
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/meta
+    envVars:
+      - key: RACIK_LLM_PROVIDER
+        value: bedrock
+      - key: BEDROCK_MODEL_ID
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_SESSION_TOKEN
+        sync: false
+      - key: SEALION_API_KEY
+        sync: false

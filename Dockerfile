@@ -1,4 +1,5 @@
-# Racik — containerised for AWS App Runner (or any container host).
+# Racik — containerised for Render, AWS App Runner, or any container host
+# that injects a $PORT env var and runs a plain Docker image.
 #
 # Builds racik.db from the raw corpus at IMAGE BUILD TIME, not at container
 # start, so cold starts don't pay the ~20s ETL cost. The corpus is a static
@@ -37,12 +38,13 @@ COPY racik/ui racik/ui
 COPY index.html index.html
 COPY css css
 COPY js js
+COPY assets assets
 
 # One-time ETL: raw xlsx/csv/json -> racik/data/racik.db (~20-30s).
 RUN python racik/scripts/build_db.py
 
 ENV PYTHONUNBUFFERED=1
-# App Runner injects PORT; default to 8000 for `docker run -p 8000:8000` locally.
+# Render/App Runner both inject PORT; default to 8000 for `docker run -p 8000:8000` locally.
 ENV PORT=8000
 EXPOSE 8000
 
