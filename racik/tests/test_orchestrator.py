@@ -384,7 +384,23 @@ def test_network_failure_degrades_to_fallback(store, optimizer):
     orch = RacikOrchestrator(store, optimizer, Broken([]))
     result = orch.ask("Menu 2 hari SD")
     assert result.mode == "fallback"
-    assert "SEA-LION" in result.answer and result.plan is not None
+    assert result.plan is not None
+    # The technical failure reason is available (for a tooltip/log) but
+    # deliberately kept out of the answer body — a raw error as the first
+    # thing an operator reads is alarming and explains nothing to them.
+    assert result.fallback_reason and "connection reset" in result.fallback_reason
+    assert "SEA-LION" not in result.answer
+    assert "connection reset" not in result.answer
+
+
+def test_provider_not_configured_at_all_has_no_fallback_reason(store, optimizer):
+    """Distinguishes "nothing is set up" from "a configured provider just
+    failed" — only the latter is an error worth explaining anywhere."""
+    from racik.sealion import SeaLionClient
+    orch = RacikOrchestrator(store, optimizer, SeaLionClient(api_key=""))
+    result = orch.ask("Menu 2 hari SD")
+    assert result.mode == "fallback"
+    assert result.fallback_reason is None
 
 
 # ---------------------------------------------------------------- intent

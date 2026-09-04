@@ -328,6 +328,11 @@ class OrchestratorResult:
     # paraphrase, not something the code guarantees correct the way it
     # guarantees the structured data. A soft signal, not a rejection.
     unverified_numbers: list[str] = field(default_factory=list)
+    # Set only when a configured LLM was actually called and failed
+    # (expired credentials, throttling, network) — the technical reason,
+    # for a tooltip or log, kept out of `answer` itself. None when no
+    # provider is configured at all, since that's not a failure to explain.
+    fallback_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -336,6 +341,7 @@ class OrchestratorResult:
             "trace": [t.to_dict() for t in self.trace],
             "plan": self.plan, "resolved_request": self.resolved_request,
             "usage": self.usage, "unverified_numbers": self.unverified_numbers,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -383,9 +389,15 @@ class RacikOrchestrator:
         except SeaLionNotConfigured:
             return self._fallback(question, lang)
         except SeaLionError as exc:
+            # Keep the technical reason (AWS/network detail) out of the
+            # answer body — the "basic mode" badge already tells a kitchen
+            # operator, in plain language, that a rule-based planner
+            # answered instead. A raw AWS exception message as the literal
+            # first thing they read is alarming and means nothing to them;
+            # it's still available via fallback_reason for a tooltip or
+            # server log, just not shoved into the primary reading flow.
             result = self._fallback(question, lang)
-            result.answer = (t(lang, "error.sealion", error=exc)
-                             + "\n\n" + result.answer)
+            result.fallback_reason = t(lang, "error.sealion", error=exc)
             return result
 
     # ------------------------------------------------------------ agent loop

@@ -1085,9 +1085,14 @@ function friendlyReason(reason){
 function renderAgentPanel(askData){
   const panel = el("agentPanel");
   if(!askData){ panel.classList.add("hidden"); return; }
+  // The technical reason (expired credentials, network) lives in a
+  // tooltip, not the answer body — a raw AWS error as the first thing an
+  // operator reads is alarming and means nothing to them; the badge text
+  // itself already says, in plain language, that a rule-based planner
+  // answered instead.
   const modeTag = askData.mode === "sealion"
     ? `<span class="qbadge high">${esc(askData.model.split("/").pop())}</span>`
-    : `<span class="qbadge medium">${esc(t("orch.basic"))}</span>`;
+    : `<span class="qbadge medium"${askData.fallback_reason ? ` title="${esc(askData.fallback_reason)}"` : ""}>${esc(t("orch.basic"))}</span>`;
   const tools = askData.trace.length
     ? `<details style="margin-top:10px">
          <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600">
@@ -1871,7 +1876,7 @@ function wireRecipeSave(draftResult){
 function renderAnswer(d){
   const modeTag = d.mode === "sealion"
     ? `<span class="qbadge high">${esc(d.model.split("/").pop())}</span>`
-    : `<span class="qbadge medium">${esc(t("orch.basic"))}</span>`;
+    : `<span class="qbadge medium"${d.fallback_reason ? ` title="${esc(d.fallback_reason)}"` : ""}>${esc(t("orch.basic"))}</span>`;
   const tools = d.trace.length
     ? `<details style="margin-top:12px">
          <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600">
