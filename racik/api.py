@@ -19,7 +19,7 @@ from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
 from .config import (MBG, PROJECT_DIR, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS,
                      UI_DIR, MBGConfig)
 from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang, t, unit
-from .optimizer import MenuOptimizer, PlanRequest, PlanResult
+from .optimizer import MenuOptimizer, Pin, PlanRequest, PlanResult
 from .orchestrator import TOOL_SCHEMAS, RacikOrchestrator
 from .procurement import aggregate, totals
 from .report import build_report, plan_notes
@@ -51,6 +51,19 @@ def _optimizer() -> MenuOptimizer:
 # ---------------------------------------------------------------- schemas
 
 
+class PinBody(BaseModel):
+    """One slot the operator has already accepted."""
+
+    day: int = Field(..., ge=0, le=6)
+    slot: str
+    dish_id: int
+
+    def to_pin(self) -> Pin:
+        if self.slot not in SLOTS:
+            raise HTTPException(400, f"unknown slot '{self.slot}'")
+        return Pin(day_index=self.day, slot=self.slot, dish_id=self.dish_id)
+
+
 class PlanBody(BaseModel):
     days: int = Field(5, ge=1, le=7)
     stage: str = "sd"
@@ -62,6 +75,7 @@ class PlanBody(BaseModel):
     regional_cost_index: float = Field(1.0, gt=0, le=5)
     exclude_terms: list[str] = []
     exclude_dish_ids: list[int] = []
+    pins: list[PinBody] = []
     enforce_micronutrients: bool = False
     max_solve_seconds: float = Field(12.0, gt=0, le=60)
     random_seed: int = 0
@@ -80,10 +94,67 @@ class PlanBody(BaseModel):
             province=self.province, island=self.island, config=config,
             exclude_terms=self.exclude_terms,
             exclude_dish_ids=self.exclude_dish_ids,
+            pins=[p.to_pin() for p in self.pins],
             enforce_micronutrients=self.enforce_micronutrients,
             max_solve_seconds=self.max_solve_seconds,
             random_seed=self.random_seed,
         )
+
+
+class ReplanBody(PlanBody):
+    """A plan the operator has reviewed, plus what they want changed.
+
+    Deliberately stateless, like every other endpoint here: the client sends
+    the original parameters back along with its edits, rather than the server
+    holding plans in memory. `unavailable` and `reject_dish_ids` are sugar over
+    `exclude_terms` and `exclude_dish_ids` — separate fields so the response can
+    say *why* a dish went, and so a stock-out survives the operator later
+    clearing an allergy chip.
+    """
+
+    unavailable: list[str] = []
+    reject_dish_ids: list[int] = []
+
+    def to_request(self) -> PlanRequest:
+        merged = self.model_copy(update={
+            "exclude_terms": list(dict.fromkeys(
+                [*self.exclude_terms, *(u.strip() for u in self.unavailable if u.strip())])),
+            "exclude_dish_ids": list(dict.fromkeys(
+                [*self.exclude_dish_ids, *self.reject_dish_ids])),
+        })
+        return PlanBody.to_request(merged)
+
+
+# ---------------------------------------------------------------- solving
+
+
+def _solved(body: PlanBody) -> PlanResult:
+    """Solve, or fail with a detail that names the gate that emptied a slot.
+
+    Every endpoint that needs a menu goes through here, so "no vegetable
+    survived after removing kangkung" reads the same everywhere instead of
+    being a bare 422 in three places.
+    """
+    request = body.to_request()
+    result = _optimizer().solve(request)
+    if not result.feasible:
+        raise HTTPException(422, _infeasible_detail(request, result))
+    return result
+
+
+def _infeasible_detail(request: PlanRequest, result: PlanResult) -> dict:
+    detail: dict = {"status": result.status, "message": "no menu could be built"}
+    if result.status != "NO_CANDIDATES":
+        return detail
+    empty = [f for f in _optimizer().explain_candidates(request)["funnel"]
+             if not f["selected"]]
+    if empty:
+        detail["empty_slots"] = [
+            {"slot": f["slot"], "binding_gate": f["binding_gate"],
+             "in_slot": f["in_slot"], "removed": f["removed"]} for f in empty]
+        detail["message"] = ("no dish survived the filters for: "
+                             + ", ".join(f["slot"] for f in empty))
+    return detail
 
 
 # ---------------------------------------------------------------- endpoints
@@ -134,11 +205,44 @@ def meta() -> dict:
 
 @app.post("/api/plan")
 def plan(body: PlanBody) -> dict:
-    result = _optimizer().solve(body.to_request())
-    if not result.feasible:
-        raise HTTPException(
-            422, f"no menu could be built (solver status: {result.status})")
-    return _serialise(result, norm_lang(body.lang))
+    return _serialise(_solved(body), norm_lang(body.lang))
+
+
+@app.post("/api/replan")
+def replan(body: ReplanBody) -> dict:
+    """Re-solve around an operator's review of a plan they are looking at.
+
+    Three edits, in one round trip: ingredients that have run out
+    (`unavailable`), dishes they do not want (`reject_dish_ids`), and the slots
+    they already accepted and want held (`pins`). Everything the operator kept
+    stays put; everything else is re-optimised against the same AKG floors and
+    budget as the original solve.
+
+    A pin never beats a gate. If an ingredient runs out and a pinned dish
+    contains it, the dish goes and the pin is returned under `pins.dropped`
+    with its reason — an accepted day that quietly changed is worse than one
+    the operator is told about.
+    """
+    result = _solved(body)
+    payload = _serialise(result, norm_lang(body.lang))
+
+    # A day is "held" only when every slot on it was pinned and kept. A day
+    # with some slots pinned is still a changed day — the operator asked for
+    # one dish to move and needs to see which.
+    kept_slots: dict[int, set[str]] = {}
+    for pin in result.kept_pins:
+        kept_slots.setdefault(pin.day_index, set()).add(pin.slot)
+    held = [d.day_index for d in result.days
+            if kept_slots.get(d.day_index, set()) >= set(SLOTS)]
+
+    payload["replan"] = {
+        "unavailable": [u.strip() for u in body.unavailable if u.strip()],
+        "rejected": body.reject_dish_ids,
+        "held_days": held,
+        "changed_days": [d.day_index for d in result.days
+                         if d.day_index not in set(held)],
+    }
+    return payload
 
 
 @app.get("/api/dish/{dish_id}")
@@ -166,9 +270,7 @@ def dish(dish_id: int) -> dict:
 
 @app.post("/api/procurement")
 def procurement(body: PlanBody, day: Optional[int] = None) -> dict:
-    result = _optimizer().solve(body.to_request())
-    if not result.feasible:
-        raise HTTPException(422, "no menu could be built")
+    result = _solved(body)
     lines = aggregate(result, _store(),
                       day_indexes=[day] if day is not None else None)
     return {
@@ -222,9 +324,7 @@ def report(body: ReportBody) -> HTMLResponse:
     compliance, every relaxed floor, the shopping list, and the methodology
     caveats. Prints to PDF from any browser.
     """
-    result = _optimizer().solve(body.to_request())
-    if not result.feasible:
-        raise HTTPException(422, "no menu could be built")
+    result = _solved(body)
     lines = aggregate(result, _store())
     html_doc = build_report(result, lines, lang=norm_lang(body.lang),
                             sppg_name=body.sppg_name)
@@ -328,6 +428,10 @@ def _serialise(result: PlanResult, lang: str = DEFAULT_LANG) -> dict:
              "share": round(r.share, 3)}
             for r in result.relaxations
         ],
+        "pins": {
+            "kept": [p.to_dict() for p in result.kept_pins],
+            "dropped": [d.to_dict() for d in result.dropped_pins],
+        },
         "notes": _notes(result, lang),
         "lang": lang,
     }
