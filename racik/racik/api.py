@@ -8,21 +8,32 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
-                  SCHOOL_STAGES, STAGE_LABELS, stage_band)
 from .config import (MBG, PROJECT_DIR, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS,
                      UI_DIR, MBGConfig)
+
+# Load racik/.env before anything below reads os.environ (make_client(),
+# SEALION_API_KEY, BEDROCK_MODEL_ARN, ...) — nothing did this before, so a
+# filled-in .env silently had no effect unless someone remembered to
+# `export` each variable by hand. Absolute path: works regardless of the
+# directory uvicorn was launched from. override=False: a real environment
+# variable (CI, systemd, docker) still wins over the file.
+load_dotenv(PROJECT_DIR / ".env", override=False)
+
+from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
+                  SCHOOL_STAGES, STAGE_LABELS, stage_band)
 from .history import PlanHistory
 from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang, t, unit
 from .optimizer import MenuOptimizer, PlanRequest, PlanResult
 from .orchestrator import TOOL_SCHEMAS, RacikOrchestrator
 from .procurement import aggregate, totals
+from .recipes import CustomDishStore, compute_dish
 from .report import build_report, plan_notes
 from .bedrock import make_client
 from .sealion import SeaLionClient
@@ -60,6 +71,11 @@ def _substitution_agent() -> SubstitutionAgent:
     return SubstitutionAgent(_store(), make_client())
 
 
+@lru_cache(maxsize=1)
+def _custom_dishes() -> CustomDishStore:
+    return CustomDishStore()
+
+
 # ---------------------------------------------------------------- schemas
 
 
@@ -88,7 +104,8 @@ class PlanBody(BaseModel):
     # sends only the confirmed subset here — storage isn't trusted blindly.
     pantry_items: list[dict] = []
 
-    def to_request(self, recency_weights: Optional[dict] = None) -> PlanRequest:
+    def to_request(self, recency_weights: Optional[dict] = None,
+                   extra_dishes: Optional[list] = None) -> PlanRequest:
         config = MBGConfig(
             budget_per_portion_idr=self.budget_per_portion_idr,
             ingredient_budget_share=self.ingredient_budget_share,
@@ -107,6 +124,7 @@ class PlanBody(BaseModel):
             recency_weights=recency_weights or {},
             target_overrides=self.target_overrides,
             pantry_items=self.pantry_items,
+            extra_dishes=extra_dishes or (),
         )
 
 
@@ -163,9 +181,16 @@ def _solve(body: PlanBody):
     only /api/plan fetched recency_weights; the other two solved with an
     empty {}, meaning the shopping list or printed report could silently
     reflect a different menu than the one actually on screen.
+
+    Also folds in this scope's saved Recipe Workshop dishes (recipes.py)
+    as extra_dishes — a school-authored recipe that's been saved should be
+    genuinely eligible for future plans, not just sit in a list nobody's
+    plan ever considers.
     """
     weights = _history().recency_weights(body.province, body.stage)
-    return _optimizer().solve(body.to_request(recency_weights=weights))
+    extra = _custom_dishes().list_dishes(body.province, body.stage)
+    return _optimizer().solve(
+        body.to_request(recency_weights=weights, extra_dishes=extra))
 
 
 @app.post("/api/plan")
@@ -198,6 +223,38 @@ def rate(body: RateBody) -> dict:
     """
     mean = _history().rate(body.province, body.stage, body.dish_id, body.rating)
     return {"dish_id": body.dish_id, "mean_rating": round(mean, 2)}
+
+
+class RateReasonBody(BaseModel):
+    dish_id: int
+    rating: float = Field(..., ge=1, le=5)
+    province: str = ""
+    stage: str = "sd"
+    dish_name: str = ""
+    reason: str = Field(..., min_length=1)  # e.g. "too_expensive" /
+                      # "not_regional" / "nutrition" / "kids_disliked" /
+                      # "other" — same categories main branch's reject-
+                      # reason chips offered, now actually logged (see
+                      # history.feedback_log) rather than shown and
+                      # discarded. Separate from /api/rate on purpose: this
+                      # never touches the running mean, so it can't
+                      # double-count a rating already submitted.
+
+
+@app.post("/api/rate/reason")
+def rate_reason(body: RateReasonBody) -> dict:
+    """Attach a *why* to a rating that already happened."""
+    _history().log_reason(body.province, body.stage, body.dish_id,
+                          body.dish_name, body.reason, body.rating)
+    return {"ok": True}
+
+
+@app.get("/api/feedback")
+def feedback(province: str = "", stage: str = "sd", limit: int = 50) -> dict:
+    """The reasons behind low ratings, most recent first — a real feedback
+    log, unlike main branch's version which displayed the same categories
+    but never persisted or used them beyond one page view."""
+    return {"entries": _history().feedback_log(province, stage, limit)}
 
 
 class PantryReportBody(BaseModel):
@@ -241,8 +298,117 @@ def pantry_clear(province: str = "", stage: str = "sd",
     return {"ok": True}
 
 
+class RecipeComputeBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    ingredient_lines: list[str] = Field(..., min_length=1, max_length=40)
+    steps: str = ""
+    province: str = ""
+    island: str = ""
+
+
+def _ingredient_rows(dish) -> list[dict]:
+    """Per-ingredient dict for a live-built Dish (recipes.py, not yet
+    persisted to the corpus SQLite tables) in the same shape store.lines()
+    gives for a corpus dish — so the dish detail dialog renders a custom
+    dish identically to any other."""
+    rows = []
+    for ln in dish.lines:
+        rows.append({
+            "raw": ln.parsed.raw, "name": ln.name,
+            "gross_g": round(ln.gross_g, 1), "edible_g": round(ln.edible_g, 1),
+            "cost_idr": round(ln.cost_idr),
+            "tkpi_code": ln.match.food.code if ln.matched else "",
+            "tkpi_name": ln.food_name if ln.matched else "",
+            "match_method": ln.match.method if ln.matched else "",
+            "urt_confidence": str(ln.parsed.confidence.value
+                                  if hasattr(ln.parsed.confidence, "value")
+                                  else ln.parsed.confidence),
+            "urt_rule": ln.parsed.rule, "unquantified": ln.parsed.unquantified,
+        })
+    return rows
+
+
+@app.post("/api/recipe/compute")
+def recipe_compute(body: RecipeComputeBody) -> dict:
+    """Preview a school-authored dish without saving it — the same
+    deterministic pipeline every corpus recipe goes through (see
+    recipes.py), so what's shown here is exactly what would be saved."""
+    dish = compute_dish(-1, body.name, body.ingredient_lines,
+                        steps=body.steps, province=body.province,
+                        island=body.island)
+    if dish is None:
+        raise HTTPException(
+            422, "Could not compute a dish from these ingredient lines — "
+            "check the names and quantities.")
+    payload = dish.to_dict()
+    payload["steps"] = dish.steps
+    payload["main_food"] = dish.main_food_name
+    payload["ingredients"] = _ingredient_rows(dish)
+    return payload
+
+
+class RecipeSaveBody(BaseModel):
+    province: str = ""
+    stage: str = "sd"
+    name: str = Field(..., min_length=1, max_length=200)
+    ingredient_lines: list[str] = Field(..., min_length=1, max_length=40)
+    steps: str = ""
+    island: str = ""
+
+
+@app.post("/api/recipe/save")
+def recipe_save(body: RecipeSaveBody) -> dict:
+    """Persist a school-authored dish, scoped like ratings and pantry —
+    and from the next solve onward it's a genuine candidate (see _solve's
+    extra_dishes), not just a saved record nothing reads."""
+    dish = compute_dish(-1, body.name, body.ingredient_lines,
+                        steps=body.steps, province=body.province,
+                        island=body.island)
+    if dish is None:
+        raise HTTPException(
+            422, "Could not compute a dish from these ingredient lines — "
+            "check the names and quantities.")
+    dish_id = _custom_dishes().save(
+        body.province, body.stage, body.name, body.ingredient_lines,
+        steps=body.steps, island=body.island)
+    return {"dish_id": dish_id}
+
+
+@app.get("/api/recipe/list")
+def recipe_list(province: str = "", stage: str = "sd") -> dict:
+    dishes = _custom_dishes().list_dishes(province, stage)
+    return {"dishes": [d.to_dict() for d in dishes]}
+
+
+class RecipeDeleteBody(BaseModel):
+    province: str = ""
+    stage: str = "sd"
+    dish_id: int
+
+
+@app.post("/api/recipe/delete")
+def recipe_delete(body: RecipeDeleteBody) -> dict:
+    _custom_dishes().delete(body.province, body.stage, body.dish_id)
+    return {"ok": True}
+
+
 @app.get("/api/dish/{dish_id}")
-def dish(dish_id: int) -> dict:
+def dish(dish_id: int, province: str = "", stage: str = "sd") -> dict:
+    # Negative ids are Recipe Workshop dishes (recipes.py) — never in the
+    # shared corpus store, but real once saved: they can be selected into
+    # an actual plan (see _solve's extra_dishes) and need to open the same
+    # detail dialog any other tray tile does. province/stage locate the
+    # right scope, same as every other Recipe Workshop/pantry/rating call.
+    if dish_id < 0:
+        found = _custom_dishes().get(province, stage, dish_id)
+        if found is None:
+            raise HTTPException(404, f"dish {dish_id} not found")
+        payload = found.to_dict()
+        payload["steps"] = found.steps
+        payload["main_food"] = found.main_food_name
+        payload["ingredients"] = _ingredient_rows(found)
+        return payload
+
     store = _store()
     found = store.dish(dish_id)
     if found is None:
@@ -268,6 +434,10 @@ class SubstituteBody(BaseModel):
     dish_id: int
     ingredient: str = Field(..., min_length=1, max_length=200)
     lang: str = DEFAULT_LANG
+    # Only needed when dish_id is a Recipe Workshop dish (negative id) —
+    # scopes the lookup, same as /api/dish/{id}.
+    province: str = ""
+    stage: str = "sd"
 
 
 @app.post("/api/substitute")
@@ -278,8 +448,15 @@ def substitute(body: SubstituteBody) -> dict:
     call over one ingredient in an already-chosen dish. See substitution.py.
     """
     try:
-        result = _substitution_agent().review(
-            body.dish_id, body.ingredient, lang=norm_lang(body.lang))
+        if body.dish_id < 0:
+            found = _custom_dishes().get(body.province, body.stage, body.dish_id)
+            if found is None:
+                raise HTTPException(404, f"dish {body.dish_id} not found")
+            result = _substitution_agent().review_custom(
+                found, body.ingredient, lang=norm_lang(body.lang))
+        else:
+            result = _substitution_agent().review(
+                body.dish_id, body.ingredient, lang=norm_lang(body.lang))
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return result.to_dict()
@@ -306,8 +483,12 @@ def candidates(body: PlanBody) -> dict:
 
     Answers "why was this dish never considered?" — the gates in order, the
     score formula with its weights, and how many dishes each gate removed.
+    Includes this scope's saved Recipe Workshop dishes as extra_dishes, same
+    as _solve() — otherwise "why wasn't my saved recipe eligible" would get
+    an answer computed without it in the pool at all.
     """
-    return _optimizer().explain_candidates(body.to_request())
+    extra = _custom_dishes().list_dishes(body.province, body.stage)
+    return _optimizer().explain_candidates(body.to_request(extra_dishes=extra))
 
 
 class TranslateBody(BaseModel):
@@ -385,9 +566,18 @@ def orchestrator_status() -> dict:
         **client.describe(),
         "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
         "max_steps": _orchestrator().max_steps,
+        # "sealion" here is a legacy tag meaning "a real LLM is configured
+        # and answering" — the UI already branches on it that way in five
+        # places (see ui/index.html), not literally "this is SEA-LION".
+        # The actual provider is in the "provider"/"model" fields above.
         "mode": "sealion" if client.configured else "fallback",
-        "hint": ("Set SEALION_API_KEY to enable SEA-LION orchestration; "
-                 "without it Racik answers with a rule-based planner."),
+        "hint": (f"{client.model} is configured and answering via "
+                 f"{client.describe().get('provider', 'the configured provider')}."
+                 if client.configured else
+                 "No LLM provider configured (see racik/.env.example) — "
+                 "Racik answers with a rule-based planner instead. Any of "
+                 "SEALION_API_KEY, BEDROCK_MODEL_ARN, or "
+                 "BEDROCK_NATIVE_MODEL_ID turns this on."),
     }
 
 

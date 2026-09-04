@@ -80,7 +80,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "[Orkestrator berhenti: {reason}. Menampilkan hasil alat terakhir: "
             "{tool}.]"),
         "error.sealion": (
-            "[SEA-LION tidak dapat dihubungi: {error}. Menjawab dengan "
+            "[SEA-LION tidak dapat dihubungi: {error} Menjawab dengan "
             "perencana deterministik.]"),
     },
     "en": {
@@ -132,7 +132,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "[Orchestrator stopped: {reason}. Showing the last tool result: "
             "{tool}.]"),
         "error.sealion": (
-            "[SEA-LION could not be reached: {error}. Answering with the "
+            "[SEA-LION could not be reached: {error} Answering with the "
             "deterministic planner.]"),
     },
 }

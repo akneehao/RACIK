@@ -164,6 +164,40 @@ def test_a_loved_dish_recurs_sooner_than_an_unrated_one(optimizer, history):
                                          rel=0.05)
 
 
+def test_rating_reason_is_logged_separately_and_optional(history):
+    # rate() alone — no reason involved, nothing logged.
+    history.rate("Jawa Tengah", "sd", 201, 2)
+    assert history.feedback_log("Jawa Tengah", "sd") == []
+
+    # log_reason() is independent — it doesn't touch the running mean, so
+    # it can be called after the fact without double-counting the rating.
+    mean_before = history.rating("Jawa Tengah", "sd", 202)
+    history.rate("Jawa Tengah", "sd", 202, 1)
+    history.log_reason("Jawa Tengah", "sd", 202, "Ayam Goreng",
+                       "too_expensive", 1)
+    assert history.rating("Jawa Tengah", "sd", 202) == 1.0  # unchanged by log_reason
+    log = history.feedback_log("Jawa Tengah", "sd")
+    assert len(log) == 1
+    assert log[0]["dish_id"] == 202
+    assert log[0]["dish_name"] == "Ayam Goreng"
+    assert log[0]["reason"] == "too_expensive"
+    assert log[0]["rating"] == 1
+
+
+def test_feedback_log_scopes_and_orders_most_recent_first(history):
+    history.log_reason("Jawa Tengah", "sd", 1, "A", "too_expensive", 1)
+    history.log_reason("Jawa Tengah", "sd", 2, "B", "kids_disliked", 2)
+    history.log_reason("Bali", "sd", 3, "C", "other", 1)
+
+    log = history.feedback_log("Jawa Tengah", "sd")
+    assert [e["dish_id"] for e in log] == [2, 1]  # most recent first
+
+    bali_log = history.feedback_log("Bali", "sd")
+    assert len(bali_log) == 1
+    assert bali_log[0]["dish_id"] == 3
+    assert bali_log[0]["reason"] == "other"
+
+
 # ---------------------------------------------------------------- target overrides
 
 def test_target_override_moves_the_binding_target(optimizer):
@@ -453,3 +487,143 @@ def test_unknown_dish_raises(store):
     agent = SubstitutionAgent(store)
     with pytest.raises(ValueError):
         agent.review(999_999_999, "garlic", lang="en")
+
+
+def test_review_custom_handles_a_dish_never_in_the_store(store):
+    """A saved Recipe Workshop dish can end up selected into an actual plan
+    (extra_dishes' guaranteed inclusion) — review_custom is the path that
+    handles "ingredient missing today" for it without a corpus lookup."""
+    from racik.recipes import compute_dish
+    custom = compute_dish(-1, "Gulai Ayam Hijau", [
+        "1 kg ayam, daging, segar", "400 ml santan", "3 buah cabai hijau",
+    ], province="Jawa Tengah")
+    assert custom is not None
+    agent = SubstitutionAgent(store)
+    result = agent.review_custom(custom, "ayam", lang="en")
+    assert result.is_core is True   # the dish's main ingredient
+    assert result.dish_id == -1
+
+
+# ---------------------------------------------------------------- recipe workshop API
+
+def _recipe_client():
+    from fastapi.testclient import TestClient
+    from racik.api import app
+    return TestClient(app)
+
+
+def test_recipe_compute_previews_without_saving():
+    client = _recipe_client()
+    res = client.post("/api/recipe/compute", json={
+        "name": "Gulai Ayam Hijau",
+        "ingredient_lines": ["1 kg ayam, daging, segar", "400 ml santan"],
+        "province": "Jawa Tengah"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["cost_per_portion_idr"] > 0
+    assert body["per_portion"]["protein_g"] > 0
+    assert body["ingredients"]
+    # a preview only — nothing shows up in the saved list
+    listed = client.get("/api/recipe/list",
+                        params={"province": "Jawa Tengah", "stage": "sd"}).json()
+    assert not any(d["name"] == "Gulai Ayam Hijau" for d in listed["dishes"])
+
+
+def test_recipe_compute_rejects_unusable_ingredients():
+    client = _recipe_client()
+    res = client.post("/api/recipe/compute", json={
+        "name": "Gibberish", "ingredient_lines": ["zzz not real zzz"]})
+    assert res.status_code == 422
+
+
+def test_recipe_save_list_delete_round_trip():
+    client = _recipe_client()
+    scope = {"province": "__test_recipe_scope__", "stage": "sd"}
+    save = client.post("/api/recipe/save", json={
+        **scope, "name": "Gulai Ayam Hijau __test__",
+        "ingredient_lines": ["1 kg ayam, daging, segar", "400 ml santan"]})
+    assert save.status_code == 200, save.text
+    dish_id = save.json()["dish_id"]
+    assert dish_id < 0
+
+    listed = client.get("/api/recipe/list", params=scope).json()
+    assert any(d["dish_id"] == dish_id for d in listed["dishes"])
+
+    delete = client.post("/api/recipe/delete", json={**scope, "dish_id": dish_id})
+    assert delete.status_code == 200
+    listed_after = client.get("/api/recipe/list", params=scope).json()
+    assert not any(d["dish_id"] == dish_id for d in listed_after["dishes"])
+
+
+def test_recipe_save_rejects_unusable_ingredients():
+    client = _recipe_client()
+    res = client.post("/api/recipe/save", json={
+        "province": "__test_recipe_scope__", "stage": "sd", "name": "Gibberish",
+        "ingredient_lines": ["zzz not real zzz"]})
+    assert res.status_code == 422
+
+
+def test_saved_recipe_dish_detail_resolves_by_negative_id():
+    client = _recipe_client()
+    scope = {"province": "__test_recipe_scope__", "stage": "sd"}
+    dish_id = client.post("/api/recipe/save", json={
+        **scope, "name": "Gulai Ayam Hijau __test__",
+        "ingredient_lines": ["1 kg ayam, daging, segar", "400 ml santan"],
+    }).json()["dish_id"]
+    try:
+        res = client.get(f"/api/dish/{dish_id}", params=scope)
+        assert res.status_code == 200, res.text
+        assert res.json()["name"] == "Gulai Ayam Hijau __test__"
+        assert res.json()["ingredients"]
+    finally:
+        client.post("/api/recipe/delete", json={**scope, "dish_id": dish_id})
+
+
+def test_substitute_endpoint_handles_a_saved_recipe_dish():
+    client = _recipe_client()
+    scope = {"province": "__test_recipe_scope__", "stage": "sd"}
+    dish_id = client.post("/api/recipe/save", json={
+        **scope, "name": "Gulai Ayam Hijau __test__",
+        "ingredient_lines": ["1 kg ayam, daging, segar", "400 ml santan"],
+    }).json()["dish_id"]
+    try:
+        res = client.post("/api/substitute", json={
+            **scope, "dish_id": dish_id, "ingredient": "ayam", "lang": "en"})
+        assert res.status_code == 200, res.text
+        assert res.json()["is_core"] is True
+    finally:
+        client.post("/api/recipe/delete", json={**scope, "dish_id": dish_id})
+
+
+def test_planbody_to_request_carries_extra_dishes():
+    from racik.api import PlanBody
+    from racik.recipes import compute_dish
+    custom = compute_dish(-1, "X", ["1 kg ayam, daging, segar"],
+                          province="Jawa Tengah")
+    assert custom is not None
+    req = PlanBody(stage="sd").to_request(extra_dishes=[custom])
+    assert list(req.extra_dishes) == [custom]
+    # defaults to empty, not None, when nothing is passed
+    assert PlanBody(stage="sd").to_request().extra_dishes == ()
+
+
+def test_solve_fetches_this_scopes_saved_recipes_as_extra_dishes():
+    """api._solve() is the one place /api/plan, /api/procurement and
+    /api/report get a PlanRequest — a saved Recipe Workshop dish for this
+    scope must reach every one of them as extra_dishes, not just sit in
+    the list nothing reads (see the docstring on _solve)."""
+    from unittest.mock import patch
+    from racik.recipes import CustomDishStore
+
+    client = _recipe_client()
+    body = {"days": 1, "stage": "sd", "portions": 30,
+           "province": "__test_extra_dishes_scope__", "max_solve_seconds": 5}
+    with patch.object(CustomDishStore, "list_dishes",
+                      return_value=[]) as mocked:
+        for path in ("/api/plan", "/api/procurement", "/api/candidates"):
+            mocked.reset_mock()
+            res = client.post(path, json=body)
+            assert res.status_code == 200, f"{path} failed: {res.text[:300]}"
+            assert mocked.call_count == 1, (
+                f"{path} did not fetch this scope's saved recipes as "
+                "extra_dishes")

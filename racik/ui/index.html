@@ -120,6 +120,43 @@
   .nut .track > i{display:block;height:100%;background:var(--leaf)}
   .nut .track > i.short{background:var(--gold)}
   .nut .track > i.bad{background:var(--chili)}
+
+  /* ---------- nav ---------- */
+  .result-nav{display:flex;gap:6px;margin:22px 0 18px;border-bottom:1.5px solid var(--line)}
+  .result-nav-btn{border:none;background:none;padding:11px 16px;font-size:14px;font-weight:700;
+    color:var(--ink-soft);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;
+    font-family:inherit}
+  .result-nav-btn.active{color:var(--leaf-dark);border-bottom-color:var(--leaf)}
+  .result-nav-btn:hover{color:var(--ink)}
+
+  /* ---------- vertical nutrition chart ---------- */
+  .chart-vert{display:flex;align-items:flex-end;gap:14px;height:180px;padding:8px 4px 0;
+    overflow-x:auto}
+  .chart-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+    height:100%;min-width:52px;flex-shrink:0}
+  .chart-col .bar-wrap{flex:1;display:flex;align-items:flex-end;width:26px}
+  .chart-col .bar{width:100%;border-radius:5px 5px 2px 2px;background:var(--leaf);
+    min-height:3px;transition:height .25s ease}
+  .chart-col .bar.short{background:var(--gold)}
+  .chart-col .bar.bad{background:var(--chili)}
+  .chart-col .pct{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;
+    margin-bottom:4px;color:var(--ink-soft)}
+  .chart-col .lbl{font-size:10.5px;color:var(--ink-soft);margin-top:8px;text-align:center;
+    line-height:1.25;max-width:60px}
+  .chart-col .lbl .advisory{display:block;margin:2px auto 0}
+
+  /* ---------- day review ---------- */
+  .review-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .review-btns{display:flex;gap:8px}
+  .review-btn{border:1.5px solid var(--line);background:var(--card);border-radius:9px;
+    width:38px;height:38px;font-size:16px;cursor:pointer;color:var(--ink-soft)}
+  .review-btn.accept.active{background:var(--leaf);border-color:var(--leaf);color:#fff}
+  .review-btn.reject.active{background:var(--chili);border-color:var(--chili);color:#fff}
+  .reason-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+  .reason-chip{font-size:12.5px;padding:7px 13px;border-radius:100px;border:1.5px solid var(--line);
+    background:var(--card);cursor:pointer;color:var(--ink-soft);font-family:inherit}
+  .reason-chip:hover{border-color:var(--chili)}
+  .reason-chip.picked{background:var(--chili);border-color:var(--chili);color:#fff}
   .nut .val{text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px}
   .advisory{font-size:9.5px;font-weight:700;color:var(--warn);border:1px solid var(--gold-soft);
     background:#FFF8EA;padding:1px 5px;border-radius:5px;letter-spacing:.03em}
@@ -263,6 +300,12 @@
             </ul>
           </div>
         </div>
+
+        <div id="recipeBox" class="card pad hidden" style="margin-top:20px">
+          <h3 style="font-size:17px" data-i18n="recipe.myTitle"></h3>
+          <p class="hint" style="margin-top:0" data-i18n="recipe.myHint"></p>
+          <div id="recipeList" style="display:flex;flex-direction:column;gap:7px;margin-top:10px"></div>
+        </div>
       </aside>
     </div>
   </section>
@@ -291,18 +334,32 @@
     <div class="metrics" id="metrics"></div>
     <div id="notes"></div>
 
-    <div class="section-head"><div><h2 data-i18n="sec.tray"></h2>
-      <p data-i18n="sec.traySub"></p></div></div>
-    <div class="tabs" id="dayTabs" role="tablist"></div>
-    <div class="tray" id="tray"></div>
+    <nav class="result-nav" id="resultNav" role="tablist">
+      <button type="button" class="result-nav-btn active" data-view="plan"
+        role="tab" aria-selected="true" data-i18n="nav.plan"></button>
+      <button type="button" class="result-nav-btn" data-view="procurement"
+        role="tab" aria-selected="false" data-i18n="nav.procurement"></button>
+    </nav>
 
-    <div class="section-head"><div><h2 data-i18n="sec.compliance"></h2>
-      <p id="complianceSub"></p></div></div>
-    <div class="card pad" id="compliance"></div>
+    <div id="viewPlan">
+      <div class="tabs" id="dayTabs" role="tablist"></div>
 
-    <div class="section-head"><div><h2 data-i18n="sec.proc"></h2>
-      <p id="procSub"></p></div></div>
-    <div class="card pad scroll" id="procurement"></div>
+      <div class="section-head"><div><h2 data-i18n="sec.compliance"></h2>
+        <p id="complianceSub"></p></div></div>
+      <div class="card pad" id="complianceChart"></div>
+
+      <div class="card pad" id="dayReview" style="margin:14px 0"></div>
+
+      <div class="section-head"><div><h2 data-i18n="sec.tray"></h2>
+        <p data-i18n="sec.traySub"></p></div></div>
+      <div class="tray" id="tray"></div>
+    </div>
+
+    <div id="viewProcurement" class="hidden">
+      <div class="section-head"><div><h2 data-i18n="sec.proc"></h2>
+        <p id="procSub"></p></div></div>
+      <div class="card pad scroll" id="procurement"></div>
+    </div>
   </section>
 </main>
 
@@ -356,7 +413,7 @@ const STRINGS = {
     "btn.go": "Susun menu",
     "btn.going": "Menghitung…",
     "loading.recalc": "Menyusun ulang menu — solver berjalan sampai ±25 detik, hasil sebelumnya masih tampil sampai selesai.",
-    "hint.go": "Optimasi berjalan sampai ±12 detik.",
+    "hint.go": "Menyusun menu bisa sampai ±25 detik — memanggil agen lalu solver.",
     "agent.title": "Cara Racik menyusun menu ini",
     "ask.title": "Tanya Racik",
     "ask.desc": "Tulis kebutuhan Anda dalam bahasa Indonesia. Orkestrator memanggil mesin perhitungan — setiap angka berasal dari alat, bukan dari model.",
@@ -379,6 +436,8 @@ const STRINGS = {
     "btn.csv": "Unduh belanja (CSV)",
     "btn.report": "Laporan kepatuhan (cetak/PDF)",
     "report.building": "Menyusun laporan…",
+    "nav.plan": "Rencana Menu",
+    "nav.procurement": "Belanja",
     "sec.tray": "Nampan harian",
     "sec.traySub": "Klik komponen untuk melihat bahan, langkah, dan asal angkanya.",
     "sec.compliance": "Kepatuhan gizi",
@@ -392,6 +451,8 @@ const STRINGS = {
     "m.adequacySub": "rata-rata target makro",
     "m.total": "Total / hari",
     "m.totalSub": "{portions} porsi",
+    "m.totalAll": "Total anggaran keseluruhan",
+    "m.totalAllSub": "{days} hari · seluruh porsi",
     "m.relaxed": "Batas dilonggarkan",
     "m.relaxedSome": "lihat catatan di bawah",
     "m.relaxedNone": "semua target tercapai",
@@ -432,6 +493,32 @@ const STRINGS = {
     "rate.label": "Nilai:",
     "rate.saved": "Tersimpan · rata-rata {avg}★",
     "rate.failed": "Gagal menyimpan",
+    "review.title": "Bagaimana menu hari ini?",
+    "review.prompt": "Tandai apakah menu ini siap dimasak, atau tolak dan beri tahu alasannya.",
+    "review.accept": "Terima",
+    "review.reject": "Tolak",
+    "review.acceptedNote": "Ditandai siap dimasak untuk tampilan ini — tanda ini akan hilang jika Anda menyusun ulang.",
+    "review.rejectedNote": "Ditolak — pilih alasannya di bawah.",
+    "review.pickReason": "Pilih alasan penolakan:",
+    "review.saved": "Tercatat — dipertimbangkan pada susun ulang berikutnya.",
+    "review.loggedOnly": "Dicatat — karena bukan soal rasa, hidangan ini tidak akan dihindari pada susunan menu berikutnya.",
+    "review.failed": "Gagal menyimpan, coba lagi.",
+    "fb.tooExpensive": "Terlalu mahal",
+    "fb.notRegional": "Tidak sesuai daerah",
+    "fb.nutrition": "Masalah gizi",
+    "fb.kidsDisliked": "Anak-anak tidak suka",
+    "fb.other": "Lainnya",
+    "recipe.draftBadge": "Draf resep — belum disimpan",
+    "recipe.reviewHint": "Angka di atas dihitung dari daftar bahan ini dengan cara yang sama seperti resep korpus mana pun. Periksa sebelum menyimpan.",
+    "recipe.saveStage": "Simpan untuk jenjang",
+    "recipe.saveProvince": "Simpan untuk daerah",
+    "recipe.save": "Simpan resep ini",
+    "recipe.saving": "Menyimpan…",
+    "recipe.saved": "Tersimpan — akan ikut dipertimbangkan pada susunan menu berikutnya",
+    "recipe.saveFailed": "Gagal menyimpan",
+    "recipe.myTitle": "Resep tersimpan",
+    "recipe.myHint": "Ditambahkan lewat Tanya Racik (mis. 'tambah resep ...'). Ikut dipertimbangkan pada susunan menu untuk jenjang & daerah ini.",
+    "recipe.myRemove": "Hapus",
     "sub.calling": "Memeriksa ketersediaan…",
     "sub.core": "Bahan utama",
     "sub.flexible": "Bahan pelengkap",
@@ -461,7 +548,7 @@ const STRINGS = {
     "csv.file": "racik-belanja-{days}hari-{portions}porsi.csv",
     "orch.active": "SEA-LION aktif",
     "orch.basic": "mode dasar",
-    "orch.basicTitle": "SEALION_API_KEY belum diset — memakai perencana berbasis aturan",
+    "orch.basicTitle": "Belum ada model bahasa yang diatur — memakai perencana berbasis aturan",
     "orch.unavailable": "status tidak tersedia",
     "ask.calling": "Memanggil mesin perhitungan…",
     "ask.steps": "{n} langkah · {reason}",
@@ -508,7 +595,7 @@ const STRINGS = {
     "btn.go": "Build menu",
     "btn.going": "Solving…",
     "loading.recalc": "Rebuilding the menu — the solver runs up to ~25s, the previous result stays visible until it's done.",
-    "hint.go": "Optimisation runs for up to ~12 seconds.",
+    "hint.go": "Building a menu can take up to ~25 seconds — it calls the agent, then the solver.",
     "agent.title": "How Racik built this menu",
     "ask.title": "Ask Racik",
     "ask.desc": "Describe what you need in plain language. The orchestrator calls the calculation engine — every number comes from a tool, never from the model.",
@@ -531,6 +618,8 @@ const STRINGS = {
     "btn.csv": "Download shopping list (CSV)",
     "btn.report": "Compliance report (print/PDF)",
     "report.building": "Building report…",
+    "nav.plan": "Meal Plan",
+    "nav.procurement": "Shopping List",
     "sec.tray": "Daily tray",
     "sec.traySub": "Click a component to see its ingredients, steps, and where the numbers came from.",
     "sec.compliance": "Nutrient compliance",
@@ -544,6 +633,8 @@ const STRINGS = {
     "m.adequacySub": "mean of macro targets",
     "m.total": "Total / day",
     "m.totalSub": "{portions} portions",
+    "m.totalAll": "Total plan cost",
+    "m.totalAllSub": "{days} days · all portions",
     "m.relaxed": "Floors relaxed",
     "m.relaxedSome": "see notes below",
     "m.relaxedNone": "all targets met",
@@ -584,6 +675,32 @@ const STRINGS = {
     "rate.label": "Rate:",
     "rate.saved": "Saved · avg {avg}★",
     "rate.failed": "Failed to save",
+    "review.title": "How does today's menu look?",
+    "review.prompt": "Mark this menu ready to cook, or reject it and say why.",
+    "review.accept": "Accept",
+    "review.reject": "Reject",
+    "review.acceptedNote": "Marked ready to cook for this view — this mark clears if you rebuild the menu.",
+    "review.rejectedNote": "Rejected — pick a reason below.",
+    "review.pickReason": "Pick a reason for rejecting:",
+    "review.saved": "Recorded — will be weighed in the next rebuild.",
+    "review.loggedOnly": "Noted — since it's not a taste complaint, this won't change which dishes we choose next time.",
+    "review.failed": "Failed to save, try again.",
+    "fb.tooExpensive": "Too expensive",
+    "fb.notRegional": "Not regionally appropriate",
+    "fb.nutrition": "Nutrition concern",
+    "fb.kidsDisliked": "Kids didn't like it",
+    "fb.other": "Other",
+    "recipe.draftBadge": "Recipe draft — not saved yet",
+    "recipe.reviewHint": "The numbers above are computed from this ingredient list the same way any corpus recipe is. Check it before saving.",
+    "recipe.saveStage": "Save for stage",
+    "recipe.saveProvince": "Save for region",
+    "recipe.save": "Save this recipe",
+    "recipe.saving": "Saving…",
+    "recipe.saved": "Saved — will be considered in the next menu built for this scope",
+    "recipe.saveFailed": "Failed to save",
+    "recipe.myTitle": "Saved recipes",
+    "recipe.myHint": "Added via Ask Racik (e.g. 'add a recipe for ...'). Considered when building menus for this stage & region.",
+    "recipe.myRemove": "Remove",
     "sub.calling": "Checking availability…",
     "sub.core": "Core ingredient",
     "sub.flexible": "Flexible ingredient",
@@ -613,7 +730,7 @@ const STRINGS = {
     "csv.file": "racik-shopping-{days}days-{portions}portions.csv",
     "orch.active": "SEA-LION active",
     "orch.basic": "basic mode",
-    "orch.basicTitle": "SEALION_API_KEY not set — using the rule-based planner",
+    "orch.basicTitle": "No language model configured — using the rule-based planner",
     "orch.unavailable": "status unavailable",
     "ask.calling": "Calling the calculation engine…",
     "ask.steps": "{n} steps · {reason}",
@@ -754,11 +871,12 @@ async function boot(){
     el("allergyChips").appendChild(b);
   });
 
-  el("stage").onchange = () => { OVERRIDES = {}; renderTargets(); loadPantry(); };
-  el("province").onchange = loadPantry;
+  el("stage").onchange = () => { OVERRIDES = {}; renderTargets(); loadPantry(); loadRecipes(); };
+  el("province").onchange = () => { loadPantry(); loadRecipes(); };
   renderTargets();
   loadOrchestratorStatus();
   loadPantry();
+  loadRecipes();
 }
 
 /** What's on record from a previous week's "sisa?" report (Procurement
@@ -813,6 +931,42 @@ function collectPantryItems(){
       usable_within_days: +row.querySelector(".pantry-days").value || 3
     };
   });
+}
+
+/** What's been saved from the Recipe Workshop (propose_recipe via Tanya
+ * Racik) for this scope — visibility that the save actually did something,
+ * and a way to remove one, same as the pantry list above it. */
+async function loadRecipes(){
+  const box = el("recipeBox"), list = el("recipeList");
+  try{
+    const res = await fetch(API + `/api/recipe/list?province=${encodeURIComponent(el("province").value)}&stage=${el("stage").value}`);
+    const data = await res.json();
+    if(!data.dishes || !data.dishes.length){ box.classList.add("hidden"); list.innerHTML = ""; return; }
+    box.classList.remove("hidden");
+    list.innerHTML = data.dishes.map(d => `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--paper-dim);
+        border-radius:8px;padding:8px 10px;font-size:13px">
+        <span style="flex:1;min-width:120px">${esc(d.name)}
+          <span class="mono" style="color:var(--ink-soft);font-size:11.5px">
+            ${rp(d.cost_per_portion_idr)} · ${Math.round(d.per_portion.energy_kcal)} ${esc(t("u.kcal"))}</span></span>
+        <button type="button" class="recipe-remove" data-id="${d.dish_id}"
+          title="${esc(t("recipe.myRemove"))}"
+          style="border:none;background:transparent;color:var(--ink-soft);cursor:pointer;
+                 font-size:15px;line-height:1;padding:2px 4px">×</button>
+      </div>`).join("");
+    list.querySelectorAll(".recipe-remove").forEach(btn =>
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try{
+          await fetch(API + "/api/recipe/delete", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({province: el("province").value, stage: el("stage").value,
+              dish_id: +btn.dataset.id})
+          });
+          loadRecipes();
+        }catch(err){ btn.disabled = false; }
+      });
+  }catch(err){ box.classList.add("hidden"); }
 }
 
 const TARGET_ROWS = [["energy_kcal","u.kcal"],["protein_g","u.g"],["fat_g","u.g"],
@@ -1004,6 +1158,7 @@ async function generate(seed, triggerBtn){
     if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
     PLAN = await res.json();
     ACTIVE_DAY = 0;
+    DAY_REVIEW = {};
     el("setup").classList.add("hidden");
     el("result").classList.remove("hidden");
     renderAgentPanel(askData);
@@ -1051,6 +1206,9 @@ function renderPlan(){
     <div class="metric"><div class="k">${esc(t("m.total"))}</div>
       <div class="v">${rp(s.mean_cost_per_portion_idr * body.portions)}</div>
       <div class="s">${esc(t("m.totalSub", {portions: num(body.portions)}))}</div></div>
+    <div class="metric"><div class="k">${esc(t("m.totalAll"))}</div>
+      <div class="v">${rp(PLAN.days.reduce((sum, d) => sum + d.cost_total_idr, 0))}</div>
+      <div class="s">${esc(t("m.totalAllSub", {days: PLAN.days.length}))}</div></div>
     <div class="metric"><div class="k">${esc(t("m.relaxed"))}</div>
       <div class="v">${s.relaxed_floors}</div>
       <div class="s">${esc(s.relaxed_floors ? t("m.relaxedSome") : t("m.relaxedNone"))}</div></div>`;
@@ -1159,18 +1317,113 @@ function renderDay(day){
 
   el("complianceSub").textContent = t("compliance.sub",
     {day: dayLabel(day), stage: bandLabel()});
-  el("compliance").innerHTML = day.compliance.map(r => {
-    const w = Math.min(100, r.pct);
-    const cls = r.pct >= 95 ? "" : r.pct >= 80 ? "short" : "bad";
-    return `<div class="nut">
-      <div class="lbl">${esc(nutLabel(r))}
-        ${r.verified ? "" : `<span class="advisory" title="${esc(t("compliance.advisoryTitle"))}">INFO</span>`}</div>
-      <div class="track"><i class="${cls}" style="width:${w}%"></i></div>
-      <div class="val">${r.value} / ${r.target} ${esc(r.unit)}</div>
-    </div>`;
-  }).join("") +
-    `<div style="font-size:12px;color:var(--ink-soft);margin-top:12px;line-height:1.55">
+  el("complianceChart").innerHTML = `<div class="chart-vert">` +
+    day.compliance.map(r => {
+      const h = Math.min(100, r.pct);
+      const cls = r.pct >= 95 ? "" : r.pct >= 80 ? "short" : "bad";
+      return `<div class="chart-col" title="${esc(r.value)} / ${esc(r.target)} ${esc(r.unit)}">
+        <span class="pct">${r.pct}%</span>
+        <div class="bar-wrap"><div class="bar ${cls}" style="height:${h}%"></div></div>
+        <span class="lbl">${esc(nutLabel(r))}
+          ${r.verified ? "" : `<span class="advisory" title="${esc(t("compliance.advisoryTitle"))}">INFO</span>`}</span>
+      </div>`;
+    }).join("") + `</div>` +
+    `<div style="font-size:12px;color:var(--ink-soft);margin-top:14px;line-height:1.55">
       ${esc(t("compliance.footnote"))}</div>`;
+
+  renderDayReview(day);
+}
+
+/** Coarse, whole-day feedback — "is this day's menu ready to cook, or not" —
+ * separate from the per-dish star widget above it (which is about whether
+ * kids liked something they already ate). Accept is a local acknowledgement,
+ * nothing to persist. Reject asks why (the same reason categories main
+ * branch's chips offered) and, once picked, writes that reason against every
+ * dish in the day via /api/rate + /api/rate/reason: a real signal for the
+ * next solve's recency weighting, not just a note that sits unread. */
+let DAY_REVIEW = {};   // day.index -> {status, reason, saving, saved, failed}
+const REJECT_REASONS = [
+  ["too_expensive", "fb.tooExpensive"], ["not_regional", "fb.notRegional"],
+  ["nutrition", "fb.nutrition"], ["kids_disliked", "fb.kidsDisliked"],
+  ["other", "fb.other"],
+];
+const REJECT_RATING = 2;   // a representative "didn't work" value for the log/weighting
+
+function renderDayReview(day){
+  const box = el("dayReview");
+  const state = DAY_REVIEW[day.index] || {};
+  const chips = REJECT_REASONS.map(([key, label]) =>
+    `<button type="button" class="reason-chip${state.reason === key ? " picked" : ""}"
+       data-reason="${key}">${esc(t(label))}</button>`).join("");
+  const statusMsg = state.status === "accepted" ? t("review.acceptedNote")
+    : state.status === "rejected" ? t("review.rejectedNote") : t("review.prompt");
+  const saveMsg = state.status !== "rejected" ? ""
+    : !state.reason ? t("review.pickReason")
+    : state.saving ? "…" : state.failed ? t("review.failed")
+    : state.saved ? t(state.affectsRotation ? "review.saved" : "review.loggedOnly") : "";
+
+  box.innerHTML = `
+    <div class="review-row">
+      <div>
+        <div style="font-weight:700;font-size:14px">${esc(t("review.title"))}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(statusMsg)}</div>
+      </div>
+      <div class="review-btns">
+        <button type="button" class="review-btn accept${state.status === "accepted" ? " active" : ""}"
+          id="reviewAccept" aria-label="${esc(t("review.accept"))}" title="${esc(t("review.accept"))}">✓</button>
+        <button type="button" class="review-btn reject${state.status === "rejected" ? " active" : ""}"
+          id="reviewReject" aria-label="${esc(t("review.reject"))}" title="${esc(t("review.reject"))}">✕</button>
+      </div>
+    </div>
+    ${state.status === "rejected" ? `<div class="reason-chips">${chips}</div>
+      <div class="hint" style="margin-top:8px">${esc(saveMsg)}</div>` : ""}`;
+
+  el("reviewAccept").onclick = () => {
+    DAY_REVIEW[day.index] = {status: "accepted"};
+    renderDayReview(day);
+  };
+  el("reviewReject").onclick = () => {
+    DAY_REVIEW[day.index] = {...state, status: "rejected"};
+    renderDayReview(day);
+  };
+  box.querySelectorAll(".reason-chip").forEach(chip =>
+    chip.onclick = () => submitDayReject(day, chip.dataset.reason));
+}
+
+// Only a taste complaint should push a dish out of rotation — "too
+// expensive" or "not regional" is an objection to the plan, not to the
+// dish itself, and silently lowering the dish's rating over it would
+// devalue something the kids might genuinely like. Every reason still
+// gets logged (the feedback record), but only this one also calls
+// /api/rate to affect the next solve's recency weighting.
+const REASONS_AFFECTING_ROTATION = new Set(["kids_disliked"]);
+
+async function submitDayReject(day, reason){
+  DAY_REVIEW[day.index] = {status: "rejected", reason, saving: true};
+  renderDayReview(day);
+  const dishes = Object.values(day.slots).filter(Boolean);
+  const affectsRotation = REASONS_AFFECTING_ROTATION.has(reason);
+  try{
+    await Promise.all(dishes.map(dish => {
+      const logReason = () => fetch(API + "/api/rate/reason", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({dish_id: dish.dish_id, rating: REJECT_RATING,
+          province: LAST_BODY.province, stage: LAST_BODY.stage,
+          dish_name: dish.name, reason})
+      });
+      return affectsRotation
+        ? fetch(API + "/api/rate", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({dish_id: dish.dish_id, rating: REJECT_RATING,
+              province: LAST_BODY.province, stage: LAST_BODY.stage})
+          }).then(logReason)
+        : logReason();
+    }));
+    DAY_REVIEW[day.index] = {status: "rejected", reason, saved: true, affectsRotation};
+  }catch(err){
+    DAY_REVIEW[day.index] = {status: "rejected", reason, failed: true};
+  }
+  renderDayReview(day);
 }
 
 /** Ratings feed straight into the next solve's recency weighting
@@ -1203,7 +1456,10 @@ let CURRENT_DISH_ID = null;
 
 async function openDish(id, slot){
   CURRENT_DISH_ID = id;
-  const dish = await (await fetch(`${API}/api/dish/${id}`)).json();
+  // Negative ids are Recipe Workshop dishes (never in the shared corpus) —
+  // scoped by province+stage, same as every other Recipe Workshop call.
+  const qs = `?province=${encodeURIComponent(LAST_BODY.province)}&stage=${LAST_BODY.stage}`;
+  const dish = await (await fetch(`${API}/api/dish/${id}${qs}`)).json();
   el("dlgSlot").textContent = slotLabel(slot) || dish.slot;
   el("dlgTitle").textContent = dish.name;
   el("dlgMeta").textContent = t("dish.meta", {
@@ -1267,7 +1523,8 @@ async function reviewSubstitute(ingredient, btn){
   try{
     const res = await fetch(API + "/api/substitute", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({dish_id: CURRENT_DISH_ID, ingredient, lang: LANG})
+      body: JSON.stringify({dish_id: CURRENT_DISH_ID, ingredient, lang: LANG,
+        province: LAST_BODY.province, stage: LAST_BODY.stage})
     });
     if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
     const r = await res.json();
@@ -1401,8 +1658,11 @@ function downloadCsv(){
 /* ---------------- ask (SEA-LION orchestrator) ---------------- */
 function paintOrchBadge(s){
   const b = el("orchBadge");
-  b.textContent = s.mode === "sealion" ? t("orch.active") : t("orch.basic");
-  b.title = s.mode === "sealion" ? `${s.model} — ${s.note}` : t("orch.basicTitle");
+  // The model name itself, not a hardcoded provider label — this badge
+  // previously always said "SEA-LION active" regardless of which model
+  // was actually configured (Bedrock, a gateway, anything).
+  b.textContent = s.mode === "sealion" ? s.model.split("/").pop() : t("orch.basic");
+  b.title = s.mode === "sealion" ? `${s.provider || s.model} — ${s.note}` : t("orch.basicTitle");
   if(s.mode === "sealion"){
     b.style.background = "#E4EFE7"; b.style.color = "var(--leaf-dark)";
     b.style.borderColor = "var(--leaf)";
@@ -1438,6 +1698,100 @@ async function ask(){
   }
 }
 
+/** propose_recipe's tool result carries both the computed draft (real
+ * numbers, from the same pipeline any corpus recipe runs through) and the
+ * exact ingredient_lines/steps text the model wrote — the latter is what
+ * /api/recipe/save actually persists, so it has to be echoed back verbatim
+ * rather than re-derived from the rendered numbers. */
+function findRecipeDraft(trace){
+  const entry = (trace || []).find(x => x.tool === "propose_recipe" && x.result && x.result.draft);
+  return entry ? entry.result : null;
+}
+
+/** The model may or may not have said which stage/province this draft is
+ * for (propose_recipe's suggested_scope) — the setup form's current
+ * selection is a reasonable fallback, but silently saving under whatever
+ * the form happens to show right now (rather than what the user actually
+ * asked for) is exactly how a saved recipe ends up in the wrong scope and
+ * never gets considered for the menu it was meant for. So the scope is
+ * always shown and editable here, defaulted from whichever is known. */
+function renderRecipeDraftCard(draftResult){
+  const d = draftResult.draft;
+  const scope = draftResult.suggested_scope || {};
+  const stageOptions = (META.stages || []).map(s =>
+    `<option value="${esc(s.key)}"${s.key === (scope.stage || el("stage").value) ? " selected" : ""}>${esc(s.label)}</option>`).join("");
+  const provinceValue = scope.province || el("province").value || "";
+  const provinceOptions = `<option value=""${provinceValue ? "" : " selected"}>${esc(t("opt.noProvince"))}</option>` +
+    (META.provinces || []).map(p =>
+      `<option value="${esc(p.province)}"${p.province === provinceValue ? " selected" : ""}>${esc(p.province)}</option>`).join("");
+  const rows = (draftResult.ingredients || []).map(i => `<tr class="${i.matched ? "" : "dim"}">
+    <td>${esc(i.raw)}${i.tkpi_name ? `<div style="font-size:11px;color:var(--ink-soft)">${esc(i.tkpi_name)}</div>` : ""}</td>
+    <td class="num">${i.gross_g.toFixed(0)} g</td>
+    <td class="num">${rp(i.cost_idr)}</td>
+  </tr>`).join("");
+  return `
+    <div class="card pad" style="margin-top:14px;border-color:var(--gold)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--warn);text-transform:uppercase;letter-spacing:.05em">
+            ${esc(t("recipe.draftBadge"))}</div>
+          <h3 style="font-size:17px;margin-top:3px">${esc(d.name)}</h3>
+        </div>
+        <span class="qbadge medium">${esc(slotLabel(d.slot))}</span>
+      </div>
+      <div class="metrics" style="margin:12px 0">
+        <div class="metric"><div class="k">${esc(t("dish.energy"))}</div>
+          <div class="v">${Math.round(d.per_portion.energy_kcal)}</div><div class="s">${esc(t("dish.kcalPer"))}</div></div>
+        <div class="metric"><div class="k">${esc(t("dish.protein"))}</div>
+          <div class="v">${d.per_portion.protein_g.toFixed(1)}</div><div class="s">${esc(t("dish.gPer"))}</div></div>
+        <div class="metric"><div class="k">${esc(t("dish.cost"))}</div>
+          <div class="v" style="font-size:19px">${rp(d.cost_per_portion_idr)}</div><div class="s">${esc(t("dish.costPer"))}</div></div>
+      </div>
+      <div class="scroll"><table><tbody>${rows}</tbody></table></div>
+      <p class="hint" style="margin-top:10px">${esc(t("recipe.reviewHint"))}</p>
+      <div class="grid2" style="margin-top:12px">
+        <div>
+          <label class="fld" for="draftStage">${esc(t("recipe.saveStage"))}</label>
+          <select id="draftStage">${stageOptions}</select>
+        </div>
+        <div>
+          <label class="fld" for="draftProvince">${esc(t("recipe.saveProvince"))}</label>
+          <select id="draftProvince">${provinceOptions}</select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <button type="button" class="btn" id="recipeSaveBtn">${esc(t("recipe.save"))}</button>
+        <span class="mono" id="recipeSaveMsg" style="font-size:12px;color:var(--ink-soft)"></span>
+      </div>
+    </div>`;
+}
+
+function wireRecipeSave(draftResult){
+  const btn = el("recipeSaveBtn");
+  if(!btn) return;
+  btn.onclick = async () => {
+    const msg = el("recipeSaveMsg");
+    btn.disabled = true; msg.textContent = t("recipe.saving");
+    try{
+      const res = await fetch(API + "/api/recipe/save", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          province: el("draftProvince").value, stage: el("draftStage").value,
+          name: draftResult.draft.name,
+          ingredient_lines: draftResult.ingredient_lines || [],
+          steps: draftResult.steps || "",
+        })
+      });
+      if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      msg.textContent = t("recipe.saved");
+      loadRecipes();
+    }catch(err){
+      msg.textContent = t("recipe.saveFailed");
+      btn.disabled = false;
+    }
+  };
+}
+
 function renderAnswer(d){
   const modeTag = d.mode === "sealion"
     ? `<span class="qbadge high">${esc(d.model.split("/").pop())}</span>`
@@ -1471,11 +1825,15 @@ function renderAnswer(d){
         </div>`).join("")}
     </div>` : "";
 
+  const draft = findRecipeDraft(d.trace);
+  const draftCard = draft ? renderRecipeDraftCard(draft) : "";
+
   el("askOut").innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">${modeTag}
       <span style="font-size:11.5px;color:var(--ink-soft)">${esc(t("ask.steps", {n: d.steps, reason: friendlyReason(d.stopped_because)}))}</span></div>
     <div style="font-size:13.5px;line-height:1.65;white-space:pre-wrap">${esc(d.answer)}</div>
-    ${plan}${tools}`;
+    ${plan}${draftCard}${tools}`;
+  if(draft) wireRecipeSave(draft);
 }
 
 /* ---------------- wiring ---------------- */
@@ -1489,6 +1847,15 @@ el("askExample").onclick = () => {
 el("askBox").addEventListener("keydown", e => {
   if((e.metaKey || e.ctrlKey) && e.key === "Enter") ask();
 });
+el("resultNav").querySelectorAll(".result-nav-btn").forEach(btn =>
+  btn.onclick = () => {
+    el("resultNav").querySelectorAll(".result-nav-btn").forEach(b => {
+      b.classList.toggle("active", b === btn);
+      b.setAttribute("aria-selected", String(b === btn));
+    });
+    el("viewPlan").classList.toggle("hidden", btn.dataset.view !== "plan");
+    el("viewProcurement").classList.toggle("hidden", btn.dataset.view !== "procurement");
+  });
 el("go").onclick = () => generate(undefined, el("go"));
 el("reshuffleBtn").onclick = () => generate(Math.floor(Math.random() * 100000), el("reshuffleBtn"));
 el("backBtn").onclick = () => {

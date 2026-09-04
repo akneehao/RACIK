@@ -84,6 +84,35 @@ class SubstitutionResult:
         }
 
 
+@dataclass
+class _CustomLineView:
+    """Adapts a freshly computed IngredientLine (recipes.py, not persisted
+    into the corpus store's dish_lines table) to the flat name/raw/gross_g/
+    tkpi_code shape _review_core expects from a StoredLine."""
+
+    _line: object
+
+    @property
+    def name(self) -> str:
+        return self._line.name
+
+    @property
+    def food_name(self) -> str:
+        return self._line.food_name
+
+    @property
+    def raw(self) -> str:
+        return self._line.parsed.raw
+
+    @property
+    def gross_g(self) -> float:
+        return self._line.gross_g
+
+    @property
+    def tkpi_code(self) -> Optional[str]:
+        return self._line.match.food.code if self._line.matched else None
+
+
 class SubstitutionAgent:
     """The Reviewer half of the Planner -> Reviewer pair."""
 
@@ -93,11 +122,28 @@ class SubstitutionAgent:
 
     def review(self, dish_id: int, ingredient: str,
               lang: str = "id") -> SubstitutionResult:
-        lang = norm_lang(lang)
         dish = self.store.dish(dish_id)
         if dish is None:
             raise ValueError(f"dish {dish_id} not found")
         lines = self.store.lines(dish_id)
+        return self._review_core(dish, lines, ingredient, lang)
+
+    def review_custom(self, dish, ingredient: str,
+                      lang: str = "id") -> SubstitutionResult:
+        """Same review, for a Recipe Workshop dish (recipes.py) that was
+        never persisted into the corpus store — it can still end up
+        selected into an actual plan (extra_dishes' guaranteed inclusion),
+        so it needs the same "ingredient missing today" path any corpus
+        dish gets. Its lines are freshly computed IngredientLine objects
+        rather than the store's flattened StoredLine rows, hence the
+        adapter below instead of a second SQL fetch."""
+        lines = [_CustomLineView(ln) for ln in dish.lines]
+        return self._review_core(dish, lines, ingredient, lang)
+
+    def _review_core(self, dish, lines, ingredient: str,
+                     lang: str) -> SubstitutionResult:
+        lang = norm_lang(lang)
+        dish_id = dish.dish_id
         total_mass = sum(l.gross_g for l in lines) or 1.0
 
         needle = ingredient.strip().lower()

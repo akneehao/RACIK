@@ -58,6 +58,14 @@ search_dishes. For shopping quantities, call procurement_list.
 the Indonesian name and put the gloss beside it, never instead of it.
 - Call explain_candidates when asked why a dish was or was not chosen, or what \
 the filtering rules are.
+- Call propose_recipe when asked to design or add a new dish that is not in the \
+corpus. Choose plausible ingredients and quantities yourself, written the way a \
+cook would list them (e.g. "Ayam potong 150 g") — the tool then computes the real \
+nutrition and cost from what you wrote, the same deterministic way any corpus \
+recipe is computed. Pass province and stage when the user named them — that is \
+also the scope the draft would be saved under, so leave either blank rather than \
+guessing if the message did not say. Always tell the user this is an unsaved \
+draft that needs a kitchen operator's review before it can be used in a menu.
 
 How to answer:
 - Reply in the language the user wrote in. Indonesian input gets an Indonesian \
@@ -230,6 +238,45 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_recipe",
+            "description": ("Draft a brand-new dish that is not in the corpus, by "
+                            "writing its ingredient lines with quantities the way "
+                            "a cook would (e.g. 'Ayam potong 150 g'). The tool "
+                            "computes the real nutrition and cost from what you "
+                            "write, the same deterministic way any corpus recipe "
+                            "is computed — you never state the resulting numbers "
+                            "yourself, you only choose the ingredients and "
+                            "quantities. The result is an unsaved draft for a "
+                            "kitchen operator to review."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The dish's name."},
+                    "ingredient_lines": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": ("Each line like 'Ayam potong 150 g' or "
+                                        "'Bawang merah 10 g' — a name and an "
+                                        "explicit quantity with unit.")},
+                    "steps": {"type": "string", "description": "Optional cooking steps."},
+                    "province": {"type": "string",
+                                 "description": "Regional attribution, if the "
+                                                "user named a province — this "
+                                                "is also the scope the draft "
+                                                "would save under, so leave it "
+                                                "blank rather than guessing."},
+                    "stage": {"type": "string", "enum": _STAGE_ENUM,
+                             "description": "School stage this dish is for, "
+                                            "if the user said — also part of "
+                                            "the save scope, leave blank if "
+                                            "unclear."},
+                },
+                "required": ["name", "ingredient_lines"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "nutrition_reference",
             "description": ("AKG 2019 per-meal targets for a school stage (one MBG "
                             "meal is about one third of daily AKG), and which "
@@ -313,6 +360,7 @@ class RacikOrchestrator:
             "nutrition_reference": self._tool_nutrition_reference,
             "translate_dishes": self._tool_translate_dishes,
             "explain_candidates": self._tool_explain_candidates,
+            "propose_recipe": self._tool_propose_recipe,
         }
 
     # ------------------------------------------------------------ entry point
@@ -527,6 +575,40 @@ class RacikOrchestrator:
             config=config,
             exclude_terms=[t for t in (exclude_terms or []) if str(t).strip()])
         return self.optimizer.explain_candidates(request)
+
+    def _tool_propose_recipe(self, name: str, ingredient_lines: list[str],
+                             steps: str = "", province: str = "",
+                             stage: str = "") -> dict:
+        from .recipes import compute_dish
+        lines = [str(x) for x in (ingredient_lines or []) if str(x).strip()][:40]
+        province = _closest_province(province, self._provinces)
+        stage = stage if stage in SCHOOL_STAGES else ""
+        dish = compute_dish(-1, name, lines, steps=steps, province=province)
+        if dish is None:
+            return {"error": ("Could not compute a dish from these ingredient "
+                              "lines — they may not resolve to recognisable "
+                              "ingredients, or the mix doesn't classify into a "
+                              "tray slot (staple/hewani/nabati/sayur/buah). Try "
+                              "clearer ingredient names and explicit quantities.")}
+        return {
+            "draft": dish.to_dict(),
+            "ingredient_lines": lines,
+            "steps": steps,
+            # What to save the draft under — not necessarily the operator's
+            # current form selection. A blank field here means the user
+            # didn't say, not that it defaults to whatever's on screen.
+            "suggested_scope": {"province": province, "stage": stage},
+            "ingredients": [
+                {"raw": ln.parsed.raw,
+                 "tkpi_name": ln.food_name if ln.matched else "",
+                 "gross_g": round(ln.gross_g, 1), "cost_idr": round(ln.cost_idr),
+                 "matched": ln.matched}
+                for ln in dish.lines
+            ],
+            "note": ("Unsaved draft, computed the same way any corpus recipe is "
+                     "— from the ingredient lines above. A kitchen operator must "
+                     "review and save it before it can be planned into a menu."),
+        }
 
     def _tool_nutrition_reference(self, stage: str) -> dict:
         band = stage_band(stage)

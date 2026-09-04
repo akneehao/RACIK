@@ -108,6 +108,22 @@ class CustomDishStore:
             (scope, dish_id))
         self._conn.commit()
 
+    def get(self, province: str, stage: str, dish_id: int) -> Optional[Dish]:
+        """One saved dish, recomputed fresh — the single-id counterpart to
+        list_dishes, for looking up a custom dish that ended up selected
+        into an actual plan (its dish_id shows up in a day's slots same as
+        any corpus dish, see api.py's dish() endpoint)."""
+        scope = self.scope_key(province, stage)
+        row = self._conn.execute(
+            "SELECT name, ingredients_raw, steps, province, island FROM "
+            "custom_dishes WHERE scope = ? AND dish_id = ?",
+            (scope, dish_id)).fetchone()
+        if row is None:
+            return None
+        name, raw, steps, prov, isl = row
+        return _engine().build(dish_id, name, raw, steps=steps,
+                               province=prov, island=isl, confidence="custom")
+
     def list_dishes(self, province: str, stage: str) -> list[Dish]:
         """Every saved dish for this scope, recomputed fresh through the
         same pipeline rather than cached — so a price-table update or a

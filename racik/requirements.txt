@@ -6,6 +6,5 @@ pandas>=2.0
 openpyxl>=3.1
 pytest>=8.0
 httpx2>=2.0     # starlette.testclient's transport as of starlette>=1.0
-
-# Optional: only for the Amazon Bedrock provider
-# boto3>=1.34
+python-dotenv>=1.0   # loads racik/.env — nothing read os.environ from a file before this
+boto3>=1.34           # AWS Bedrock (RACIK_LLM_PROVIDER=bedrock_native, this team's LLM provider)

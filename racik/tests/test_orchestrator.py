@@ -224,6 +224,75 @@ def test_get_dish_exposes_gram_provenance(store, optimizer):
     assert all("basis" in line for line in detail["ingredients"])
 
 
+def test_propose_recipe_computes_real_numbers_from_model_authored_lines(store, optimizer):
+    """The model chooses the ingredient lines (this is the one tool where
+    that's allowed — see orchestrator.py's SYSTEM_PROMPT bullet on it), but
+    the resulting nutrition/cost is still computed by the same deterministic
+    pipeline every corpus recipe goes through, never stated by the model."""
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan",
+                          "3 buah cabai hijau"],
+        province="Jawa Tengah")
+    assert "error" not in out
+    assert out["draft"]["cost_per_portion_idr"] > 0
+    assert out["draft"]["per_portion"]["protein_g"] > 0
+    # echoed back verbatim, not re-derived — /api/recipe/save persists
+    # exactly this text, not the computed numbers
+    assert out["ingredient_lines"] == ["1 kg ayam, daging, segar",
+                                       "400 ml santan", "3 buah cabai hijau"]
+
+
+def test_propose_recipe_reports_the_scope_it_would_save_under(store, optimizer):
+    """Regression test for a real bug: the draft card must show (and let a
+    kitchen operator confirm/correct) exactly which province/stage a save
+    would use — silently defaulting to the setup form's current selection
+    is how a recipe drafted for one region/stage in free text ends up
+    saved under a completely different one and is never considered for
+    the menu it was actually meant for."""
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan"],
+        province="Jawa Tengah", stage="smp")
+    assert out["suggested_scope"] == {"province": "Jawa Tengah", "stage": "smp"}
+
+
+def test_propose_recipe_leaves_scope_blank_when_unsaid(store, optimizer):
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan"])
+    assert out["suggested_scope"] == {"province": "", "stage": ""}
+
+
+def test_propose_recipe_reports_an_error_not_a_crash_on_unusable_input(store, optimizer):
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](name="Gibberish",
+                                       ingredient_lines=["zzz not real zzz"])
+    assert "error" in out
+    assert "draft" not in out
+
+
+def test_propose_recipe_reaches_a_full_agent_loop(store, optimizer):
+    # _call()'s own first parameter is named "name", which collides with
+    # propose_recipe's "name" argument (the dish name) — build the
+    # ToolCall directly instead of going through that helper.
+    tool_call = ToolCall(id="call_propose_recipe", name="propose_recipe",
+                         arguments={"name": "Gulai Ayam Hijau",
+                                    "ingredient_lines": ["1 kg ayam, daging, segar",
+                                                         "400 ml santan"]})
+    client = ScriptedSeaLion([
+        ChatResult(content="", tool_calls=[tool_call]),
+        ChatResult(content="draf resep siap ditinjau"),
+    ])
+    result = RacikOrchestrator(store, optimizer, client).ask("tambah resep baru")
+    payload = result.trace[0].result
+    assert payload["draft"]["name"] == "Gulai Ayam Hijau"
+    assert payload["draft"]["cost_per_portion_idr"] > 0
+
+
 # ---------------------------------------------------------------- fallback
 
 def test_fallback_used_when_no_api_key(store, optimizer):

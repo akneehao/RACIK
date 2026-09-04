@@ -79,6 +79,17 @@ class PlanHistory:
             )
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS rating_reasons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                dish_id INTEGER NOT NULL,
+                dish_name TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                rating REAL NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS pantry (
                 scope TEXT NOT NULL,
                 tkpi_code TEXT NOT NULL,
@@ -146,6 +157,20 @@ class PlanHistory:
             (scope, dish_id, mean, n, time.time()))
         self._conn.commit()
         return mean
+
+    def log_reason(self, province: str, stage: str, dish_id: int,
+                   dish_name: str, reason: str, rating: float) -> None:
+        """Attach a *why* to a rating that already happened (mirroring main
+        branch's reject-reason chips — too expensive, not regional,
+        nutrition, kids didn't like it, other). Deliberately separate from
+        rate(): calling this doesn't touch the running mean, so a chip
+        picked after the fact can't double-count the same rating event."""
+        scope = self.scope_key(province, stage)
+        self._conn.execute(
+            "INSERT INTO rating_reasons (scope, dish_id, dish_name, "
+            "reason, rating, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (scope, dish_id, dish_name, reason.strip(), rating, time.time()))
+        self._conn.commit()
 
     def rating(self, province: str, stage: str, dish_id: int) -> Optional[float]:
         scope = self.scope_key(province, stage)
@@ -245,6 +270,22 @@ class PlanHistory:
         return [
             {"tkpi_code": r[0], "ingredient_name": r[1], "remaining_g": r[2],
              "usable_within_days": r[3], "updated_at": r[4]}
+            for r in rows
+        ]
+
+    def feedback_log(self, province: str, stage: str, limit: int = 50) -> list[dict]:
+        """Every reason logged with a rating for this scope, most recent
+        first — the read side of rating()'s optional reason, mirroring the
+        feedback list main branch's Settings tab showed (never wired to
+        anything there either; this one at least feeds the score)."""
+        scope = self.scope_key(province, stage)
+        rows = self._conn.execute(
+            "SELECT dish_id, dish_name, reason, rating, created_at "
+            "FROM rating_reasons WHERE scope = ? "
+            "ORDER BY created_at DESC LIMIT ?", (scope, limit)).fetchall()
+        return [
+            {"dish_id": r[0], "dish_name": r[1], "reason": r[2],
+             "rating": r[3], "created_at": r[4]}
             for r in rows
         ]
 

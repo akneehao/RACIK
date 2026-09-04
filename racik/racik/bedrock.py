@@ -248,17 +248,26 @@ def _to_chat_result(body: dict) -> ChatResult:
 def make_client() -> SeaLionClient:
     """Pick the LLM provider from the environment.
 
-    RACIK_LLM_PROVIDER = bedrock | gateway | sealion   (default: sealion)
+    RACIK_LLM_PROVIDER = bedrock | bedrock_native | gateway | sealion
+                          (default: sealion)
 
-      bedrock   BEDROCK_MODEL_ARN, AWS_REGION            — boto3 InvokeModel
-      gateway   SEALION_BASE_URL (Bedrock Access Gateway) — OpenAI-compatible
-      sealion   SEALION_API_KEY                           — hosted API
+      bedrock         BEDROCK_MODEL_ARN, AWS_REGION  — SEA-LION via Custom
+                       Model Import (boto3 InvokeModel, OpenAI payload shape)
+      bedrock_native   BEDROCK_NATIVE_MODEL_ID, AWS_REGION — any stock
+                       Bedrock catalog model (Claude Haiku, Nova, ...) via
+                       the Converse API. NOT SEA-LION — see bedrock_native.py.
+      gateway          SEALION_BASE_URL (Bedrock Access Gateway) — OpenAI-compatible
+      sealion          SEALION_API_KEY                           — hosted API
     """
     provider = os.environ.get("RACIK_LLM_PROVIDER", "").strip().lower()
     base_url = os.environ.get("SEALION_BASE_URL", "").strip()
 
     if provider == "bedrock" or (not provider and os.environ.get("BEDROCK_MODEL_ARN")):
         return BedrockSeaLionClient()
+    if provider in ("bedrock_native", "bedrock-native") or (
+            not provider and os.environ.get("BEDROCK_NATIVE_MODEL_ID")):
+        from .bedrock_native import BedrockNativeClient
+        return BedrockNativeClient()
     if provider == "gateway" or (not provider and base_url):
         return SeaLionClient(
             api_key=os.environ.get("SEALION_API_KEY", "bedrock"),
