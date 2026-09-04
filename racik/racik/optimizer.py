@@ -17,6 +17,7 @@ slightly short on fibre, and the report says so either way.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -27,7 +28,7 @@ from ortools.sat.python import cp_model
 
 from .akg import AgeBand, BINDING_NUTRIENTS, NUTRIENT_META
 from .config import (COMPONENT_ONLY_SLOTS, MBG, OPTIONAL_SLOTS, SLOTS,
-                     MBGConfig)
+                     TRAY_CACHE_PATH, MBGConfig)
 from .nutrition import COMPONENT_ID_BASE, Dish
 from .urt import normalize
 
@@ -44,7 +45,27 @@ W_UNDERSPEND = 8
 W_PREFERENCE = 250
 W_QUALITY = 120
 
-DEFAULT_CANDIDATES_PER_SLOT = 220
+# Override via RACIK_CANDIDATES_PER_SLOT on CPU-constrained hosts (e.g.
+# Render's free 0.1-vCPU tier), where the default search space doesn't
+# finish inside a request's time budget.
+DEFAULT_CANDIDATES_PER_SLOT = int(os.environ.get("RACIK_CANDIDATES_PER_SLOT", "220"))
+
+_TRAY_CACHE: Optional[dict] = None
+_TRAY_CACHE_LOADED = False
+
+
+def _tray_cache() -> Optional[dict]:
+    """Lazily load the precomputed-tray bank; None if it doesn't exist.
+
+    Optional by design: most requests (most regions, any custom exclusion
+    or tighter budget) never touch this and go through the real solver.
+    """
+    global _TRAY_CACHE, _TRAY_CACHE_LOADED
+    if not _TRAY_CACHE_LOADED:
+        _TRAY_CACHE_LOADED = True
+        if TRAY_CACHE_PATH.exists():
+            _TRAY_CACHE = json.loads(TRAY_CACHE_PATH.read_text())
+    return _TRAY_CACHE
 
 # ---------------------------------------------------------------- the rubric
 #
@@ -228,9 +249,11 @@ class MenuOptimizer:
     def __init__(self, dishes: Iterable[Dish]):
         self.dishes = list(dishes)
         self.by_slot: dict[str, list[Dish]] = {s: [] for s in SLOTS}
+        self.by_id: dict[int, Dish] = {}
         for dish in self.dishes:
             if dish.slot in self.by_slot:
                 self.by_slot[dish.slot].append(dish)
+            self.by_id[dish.dish_id] = dish
 
     # ------------------------------------------------------------ candidates
     def _candidates(self, request: PlanRequest,
@@ -340,6 +363,87 @@ class MenuOptimizer:
             "funnel": [f.to_dict() for _, f in funnels.values()],
         }
 
+    # ------------------------------------------------------------ tray cache
+    def _try_cache(self, request: PlanRequest, band: AgeBand,
+                   targets: dict[str, float]) -> Optional[PlanResult]:
+        """Assemble a plan from scripts/precompute_trays.py's bank, if eligible.
+
+        Only for the handful of (region, stage) combos the bank actually
+        covers, and only when this specific request's constraints are no
+        stricter than what the trays were validated against — every other
+        request (most regions, tighter budgets, enforced micronutrients,
+        custom exclusions the bank wasn't checked against) falls through to
+        the real solver unchanged. Returns None to signal "solve normally".
+        """
+        bank = _tray_cache()
+        if bank is None or request.enforce_micronutrients:
+            return None
+        pool = bank.get("trays", {}).get(request.province, {}).get(request.stage)
+        if not pool:
+            return None
+
+        budget = request.config.ingredient_budget_idr
+        exclude_ids = set(request.exclude_dish_ids)
+        exclude_terms = {t.lower() for t in request.exclude_terms if t.strip()}
+
+        eligible: list[dict[str, Dish]] = []
+        for tray in pool:
+            if tray["cost_per_portion_idr"] > budget:
+                continue
+            dish_objs = {slot: self.by_id.get(dish_id)
+                        for slot, dish_id in tray["dish_ids"].items()}
+            if any(d is None for d in dish_objs.values()):
+                continue  # corpus changed since the bank was built
+            if any(d.dish_id in exclude_ids for d in dish_objs.values()):
+                continue
+            if exclude_terms and any(_excluded(d, exclude_terms)
+                                     for d in dish_objs.values()):
+                continue
+            eligible.append(dish_objs)
+        if len(eligible) < request.days:
+            return None
+
+        # Greedy family-diverse pick — the same max_family_per_plan rule the
+        # live solver enforces, applied here without needing CP-SAT for it.
+        family_count: dict[str, int] = {}
+        chosen: list[dict[str, Dish]] = []
+        for dish_objs in eligible:
+            if len(chosen) >= request.days:
+                break
+            over_cap = False
+            for slot in request.no_repeat_slots:
+                d = dish_objs.get(slot)
+                if d is None:
+                    continue
+                fam = d.main_food_code or dish_key(d)
+                if family_count.get(fam, 0) >= request.max_family_per_plan:
+                    over_cap = True
+                    break
+            if over_cap:
+                continue
+            chosen.append(dish_objs)
+            for slot in request.no_repeat_slots:
+                d = dish_objs.get(slot)
+                if d is not None:
+                    fam = d.main_food_code or dish_key(d)
+                    family_count[fam] = family_count.get(fam, 0) + 1
+        if len(chosen) < request.days:
+            return None
+
+        from .tkpi import NUTRIENT_KEYS
+        day_plans = []
+        for idx, dish_objs in enumerate(chosen):
+            nutrients = {k: 0.0 for k in NUTRIENT_KEYS}
+            cost = 0.0
+            for d in dish_objs.values():
+                cost += d.cost_per_portion_idr
+                for k in NUTRIENT_KEYS:
+                    nutrients[k] += d.per_portion.get(k, 0.0)
+            day_plans.append(DayPlan(idx, dict(dish_objs), nutrients, cost))
+
+        return PlanResult(request, band, targets, day_plans, [], 0.0,
+                          "CACHED", 0.0, len(pool))
+
     # ------------------------------------------------------------ solve
     def solve(self, request: PlanRequest) -> PlanResult:
         from .akg import stage_band
@@ -349,6 +453,10 @@ class MenuOptimizer:
         binding = list(BINDING_NUTRIENTS)
         if request.enforce_micronutrients:
             binding += ["calcium_mg", "iron_mg", "zinc_mg", "vit_a_mcg", "vit_c_mg"]
+
+        cached = self._try_cache(request, band, targets)
+        if cached is not None:
+            return cached
 
         candidates = self._candidates(request, targets)
         total_candidates = sum(len(v) for v in candidates.values())

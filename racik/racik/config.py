@@ -30,6 +30,12 @@ DB_PATH = DATA_DIR / "racik.db"
 # served-dish history and stock/audit records across the app's lifetime, and
 # must never be touched by the ETL.
 STATE_DB_PATH = DATA_DIR / "racik_state.db"
+# A bank of pre-verified single-day trays for a handful of well-covered
+# regions (scripts/precompute_trays.py) — lets the solver skip straight to
+# an already-compliant plan on CPU-constrained hosts, for those regions
+# only. Optional: the app runs the normal live solve everywhere else, or
+# everywhere if this file doesn't exist.
+TRAY_CACHE_PATH = DATA_DIR / "precomputed_trays.json"
 UI_DIR = PROJECT_DIR / "ui"
 # The styled operator frontend (mockup-derived) lives at the repo root, one
 # level above the racik/ package — sibling to, not inside, this project.
