@@ -826,7 +826,9 @@ function collectBody(){
     budget_per_portion_idr: +el("budget").value,
     ingredient_budget_share: +el("share").value,
     exclude_terms: [...new Set(terms)],
-    max_solve_seconds: 12,
+    /* max_solve_seconds is deliberately not sent: the server picks it from the
+       CPU it actually has, so a small deployment answers quickly instead of
+       burning a limit the browser chose for it. */
     random_seed: 0,
     lang: LANG
   };
