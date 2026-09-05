@@ -46,6 +46,18 @@ RUN python racik/scripts/build_db.py
 ENV PYTHONUNBUFFERED=1
 # Render/App Runner both inject PORT; default to 8000 for `docker run -p 8000:8000` locally.
 ENV PORT=8000
+# This image targets free/low-tier container hosts (Render's free 0.1-vCPU
+# tier is the one actually exercised) — CP-SAT's search time scales with
+# real CPU, and a throttled host can't always finish a live solve fully
+# compliant. RACIK_LIMIT_PROVINCES_TO_CACHE scopes the location picker to
+# only the provinces with a precomputed, pre-verified tray bank
+# (scripts/precompute_trays.py) so every choice generates instantly with
+# guaranteed full AKG compliance instead of occasionally falling through
+# to a live solve the host is too slow for. On a host with real headroom
+# (a paid Render plan, App Runner, Cloud Run), override with
+# `-e RACIK_LIMIT_PROVINCES_TO_CACHE=` (empty) to restore the full picker.
+# Local dev is never affected — it runs uvicorn directly, not this image.
+ENV RACIK_LIMIT_PROVINCES_TO_CACHE=1
 EXPOSE 8000
 
 # Shell form so $PORT expands; --app-dir puts racik/ on sys.path without a
