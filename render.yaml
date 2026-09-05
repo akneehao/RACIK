@@ -28,6 +28,14 @@ services:
       # (e.g. 60) if generations still fail on your instance size.
       - key: RACIK_CANDIDATES_PER_SLOT
         value: "100"
+      # Scopes the location picker to only the provinces with a precomputed
+      # tray bank (scripts/precompute_trays.py) — every one of them then
+      # generates instantly with guaranteed full AKG compliance, instead of
+      # occasionally landing on a province that falls through to a live
+      # solve this host is too slow to always finish well. Local dev is
+      # unaffected (always sees every province) since this is unset there.
+      - key: RACIK_LIMIT_PROVINCES_TO_CACHE
+        value: "1"
       - key: BEDROCK_MODEL_ID
         sync: false
       - key: AWS_REGION

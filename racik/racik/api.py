@@ -5,6 +5,7 @@ Then: http://127.0.0.1:8000
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Optional
 
@@ -19,7 +20,7 @@ from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
 from .config import (FRONTEND_DIR, MBG, PROJECT_DIR, SLOT_LABELS_EN,
                      SLOT_LABELS_ID, SLOTS, UI_DIR, MBGConfig)
 from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang
-from .optimizer import MenuOptimizer, PlanRequest
+from .optimizer import MenuOptimizer, PlanRequest, _tray_cache
 from .orchestrator import TOOL_SCHEMAS, RacikGenerateError, RacikOrchestrator
 from .procurement import aggregate, totals
 from .report import build_report
@@ -96,6 +97,17 @@ class PlanBody(BaseModel):
 @app.get("/api/meta")
 def meta() -> dict:
     store = _store()
+    provinces = store.provinces()
+    # On a CPU-constrained host, scope the demo to only the provinces with
+    # a precomputed tray bank — every one of them then generates instantly
+    # with guaranteed full AKG compliance, instead of occasionally landing
+    # on a province that falls through to a live solve the host is too slow
+    # to finish well. Off by default; local dev always sees every province.
+    if os.environ.get("RACIK_LIMIT_PROVINCES_TO_CACHE"):
+        bank = _tray_cache()
+        if bank and bank.get("regions"):
+            allowed = set(bank["regions"])
+            provinces = [p for p in provinces if p[0] in allowed]
     return {
         "stats": store.stats(),
         "stages": [
@@ -110,7 +122,7 @@ def meta() -> dict:
         ],
         "provinces": [
             {"province": p, "island": i, "dishes": n}
-            for p, i, n in store.provinces()
+            for p, i, n in provinces
         ],
         "slots": [
             {"key": s, "label_id": SLOT_LABELS_ID[s], "label_en": SLOT_LABELS_EN[s]}
