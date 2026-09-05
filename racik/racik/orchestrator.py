@@ -555,7 +555,6 @@ class RacikOrchestrator:
             days=days, stage=stage, portions=portions, province=province,
             island=island, config=config,
             exclude_terms=[t for t in (exclude_terms or []) if str(t).strip()],
-            max_solve_seconds=10.0,
         )
         key = json.dumps({
             "d": days, "s": stage, "p": portions, "prov": province,

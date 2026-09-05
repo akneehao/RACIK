@@ -5,6 +5,9 @@ Then: http://127.0.0.1:8000
 """
 from __future__ import annotations
 
+import logging
+import threading
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Optional
 
@@ -16,8 +19,8 @@ from pydantic import BaseModel, Field
 
 from .akg import (ADVISORY_NUTRIENTS, BINDING_NUTRIENTS, NUTRIENT_META,
                   SCHOOL_STAGES, STAGE_LABELS, stage_band)
-from .config import (MBG, PROJECT_DIR, SLOT_LABELS_EN, SLOT_LABELS_ID, SLOTS,
-                     UI_DIR, MBGConfig)
+from .config import (DEFAULT_SOLVE_SECONDS, MBG, PROJECT_DIR, SLOT_LABELS_EN,
+                     SLOT_LABELS_ID, SLOTS, SOLVER_WORKERS, UI_DIR, MBGConfig)
 from .i18n import DEFAULT_LANG, LANG_NAMES, LANGS, norm_lang, t, unit
 from .optimizer import MenuOptimizer, Pin, PlanRequest, PlanResult
 from .orchestrator import TOOL_SCHEMAS, RacikOrchestrator
@@ -28,8 +31,34 @@ from .sealion import SeaLionClient
 from .store import RacikStore
 from .translate import DishTranslator
 
+
+def _warm() -> None:
+    """Load the corpus off the request path.
+
+    Without this the first caller after a deploy — or after a PaaS wakes an
+    idled instance — pays for opening the database and building 18k dishes,
+    which reads to them as a slow solver.
+    """
+    try:
+        _optimizer()
+        logging.getLogger("racik").info(
+            "corpus warm, %d dishes, %d solver worker(s)",
+            _store().stats()["dishes"], SOLVER_WORKERS)
+    except Exception:                       # a failed warm-up must not kill boot
+        logging.getLogger("racik").exception("corpus warm-up failed")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # In a thread rather than inline: the port opens immediately, so a platform
+    # health check cannot fail the deploy while the corpus is still loading.
+    threading.Thread(target=_warm, name="racik-warm", daemon=True).start()
+    yield
+
+
 app = FastAPI(title="Racik", version="0.1.0",
-              description="AKG-grounded MBG menu planning for Indonesia")
+              description="AKG-grounded MBG menu planning for Indonesia",
+              lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
 
@@ -77,7 +106,7 @@ class PlanBody(BaseModel):
     exclude_dish_ids: list[int] = []
     pins: list[PinBody] = []
     enforce_micronutrients: bool = False
-    max_solve_seconds: float = Field(12.0, gt=0, le=60)
+    max_solve_seconds: float = Field(DEFAULT_SOLVE_SECONDS, gt=0, le=60)
     random_seed: int = 0
     lang: str = DEFAULT_LANG
 

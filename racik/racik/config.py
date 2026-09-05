@@ -5,8 +5,10 @@ Sources are cited inline so a reviewer can trace every number to a document.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Optional
 
 # ---------------------------------------------------------------- paths
 PKG_DIR = Path(__file__).resolve().parent
@@ -111,3 +113,68 @@ OPTIONAL_SLOTS: tuple[str, ...] = ()
 COMPONENT_ONLY_SLOTS = ("staple", "buah")
 
 MBG = MBGConfig()
+
+
+# ---------------------------------------------------------------- runtime
+# Deployment policy rather than programme policy: how much CPU this process
+# actually has, and the solver defaults that follow from it.
+#
+# CP-SAT spends whatever wall-clock you give it — at the full candidate pool it
+# never proves optimality, so it always returns at the time limit. That makes
+# the time limit the latency knob and the pool size the *quality per second*
+# knob. Measured on one core, five days, SD/Jawa Tengah:
+#
+#   220 candidates / slot, 12 s  ->  adequacy 0.725, 17 floors relaxed
+#    60 candidates / slot,  4 s  ->  adequacy 0.860, 14 floors relaxed
+#
+# A smaller pool is both faster and better when the CPU is scarce, because the
+# solver stops spreading a fixed search budget over dishes it will never pick.
+
+def _cgroup_cpu_quota() -> Optional[float]:
+    """Cores this container may use, or None when not constrained by a cgroup.
+
+    `os.cpu_count()` reports the *host's* cores, which on a shared PaaS instance
+    is wildly optimistic — asking for 8 CP-SAT workers on a 0.1-vCPU share is
+    slower than asking for one. The cgroup files are the only honest answer.
+    """
+    try:                                            # cgroup v2
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()[:2]
+        if quota != "max":
+            return int(quota) / int(period)
+    except (OSError, ValueError, IndexError):
+        pass
+    try:                                            # cgroup v1
+        quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+        period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+        if quota > 0 and period > 0:
+            return quota / period
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _env(name: str, default, cast: Callable):
+    """Read a tunable from the environment, ignoring anything unparseable."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+CPU_BUDGET: float = _env("RACIK_CPU_BUDGET", None, float) or _cgroup_cpu_quota() \
+    or float(os.cpu_count() or 1)
+
+# CP-SAT's parallel portfolio needs whole cores; below one, one worker it is.
+SOLVER_WORKERS: int = max(1, min(8, int(CPU_BUDGET)))
+LOW_CPU: bool = CPU_BUDGET < 2
+
+# Below roughly 50 candidates per slot the variety constraints (no-repeat plus
+# the two-per-ingredient-family cap) deadlock and the solve returns INFEASIBLE.
+# Measured cliff: 60 solves, 40 does not. Override with care.
+DEFAULT_CANDIDATES_PER_SLOT: int = _env(
+    "RACIK_CANDIDATES_PER_SLOT", 60 if LOW_CPU else 220, int)
+DEFAULT_SOLVE_SECONDS: float = _env(
+    "RACIK_SOLVE_SECONDS", 4.0 if LOW_CPU else 12.0, float)

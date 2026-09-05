@@ -25,8 +25,9 @@ from typing import Iterable, Optional, Sequence
 from ortools.sat.python import cp_model
 
 from .akg import AgeBand, BINDING_NUTRIENTS, NUTRIENT_META
-from .config import (COMPONENT_ONLY_SLOTS, MBG, OPTIONAL_SLOTS, SLOTS,
-                     MBGConfig)
+from .config import (COMPONENT_ONLY_SLOTS, DEFAULT_CANDIDATES_PER_SLOT,
+                     DEFAULT_SOLVE_SECONDS, MBG, OPTIONAL_SLOTS, SLOTS,
+                     SOLVER_WORKERS, MBGConfig)
 from .nutrition import COMPONENT_ID_BASE, Dish
 from .urt import normalize
 
@@ -42,7 +43,9 @@ W_COST = 1
 W_PREFERENCE = 250
 W_QUALITY = 120
 
-DEFAULT_CANDIDATES_PER_SLOT = 220
+# DEFAULT_CANDIDATES_PER_SLOT and DEFAULT_SOLVE_SECONDS are derived from the
+# CPU this process actually has — see the runtime section of config.py for the
+# measurements behind the two profiles.
 
 # ---------------------------------------------------------------- the rubric
 #
@@ -130,7 +133,7 @@ class PlanRequest:
     max_family_per_plan: int = 2            # times one main ingredient may fill a slot
     candidates_per_slot: int = DEFAULT_CANDIDATES_PER_SLOT
     enforce_micronutrients: bool = False    # AKG micro values pending verification
-    max_solve_seconds: float = 20.0
+    max_solve_seconds: float = DEFAULT_SOLVE_SECONDS
     random_seed: int = 0
 
 
@@ -588,7 +591,10 @@ class MenuOptimizer:
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = request.max_solve_seconds
-        solver.parameters.num_search_workers = 8
+        # Matched to the cores this process actually has. Eight workers on a
+        # fraction of a vCPU is measurably worse than one: the portfolio thrashes
+        # and the returned menu is poorer for the same wall-clock.
+        solver.parameters.num_search_workers = SOLVER_WORKERS
         solver.parameters.random_seed = request.random_seed
         status = solver.Solve(model)
 
