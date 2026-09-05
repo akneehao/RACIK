@@ -123,7 +123,7 @@ def _verify(staging: Path, lang: str) -> None:
     ui = (staging / "ui" / "index.html").read_text(encoding="utf-8")
     if f'const DEFAULT_LANG = "{lang}"' not in ui:
         raise SystemExit(f"UI default language was not set to '{lang}'")
-    for key in ('"brand.sub"', '"page.title"'):
+    for key in ('"home.tagline"', '"page.title"'):
         if ui.count(key) < 2:
             raise SystemExit(f"UI is missing a language block for {key}")
 

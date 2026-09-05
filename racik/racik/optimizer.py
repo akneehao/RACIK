@@ -458,7 +458,13 @@ class MenuOptimizer:
         # selected), so the pantry signal is scoped to each dish's single
         # defining ingredient, the same field variety-family limits use.
         pantry_by_code = {
-            str(item.get("tkpi_code")): int(item.get("usable_within_days", 0))
+            # `.get(key, 0)` only falls back when the key is *absent* — but
+            # /api/pantry legitimately returns usable_within_days: null for
+            # an item with no expiry set (PantryReportBody's own field is
+            # Optional), so the key is present with value None and int(None)
+            # raised. `or 0` catches both "missing" and "present but None":
+            # no known shelf life means no pantry bonus, not a crash.
+            str(item.get("tkpi_code")): int(item.get("usable_within_days") or 0)
             for item in request.pantry_items if item.get("tkpi_code")
         }
 
