@@ -132,8 +132,8 @@ Kecocokan daerah: 1,0 provinsi tepat, 0,6 sepulau, 0,5 nasional, 0,2 lainnya.
 `rank_breakdown()` mengembalikan tiap suku sehingga totalnya dapat diperiksa.
 
 Corong ini membuat cerita pagu terlihat. Untuk SD di Jawa Tengah, **plafon biaya
-saja menyingkirkan 9.084 dari 13.525 hidangan lauk hewani** — dua pertiga korpus
-tersingkir karena harga sebelum solver berjalan.
+saja menyingkirkan 9.660 dari 13.525 hidangan lauk hewani** — lebih dari tujuh
+puluh persen tersingkir karena harga sebelum solver berjalan.
 
 ## Laporan kepatuhan & kebutuhan bahan
 
@@ -306,7 +306,7 @@ belasan unggahan berbeda bernama varian "Tempe Mendoan"; membatasi pada
 | `scripts/build_db.py` | ETL |
 | `scripts/package.py` | Membuat paket rilis ID dan EN |
 | `docs/CODE_MAP.md` | Urutan membaca kode secara terpandu |
-| `tests/` | 100 pengujian |
+| `tests/` | 167 pengujian |
 
 ## API
 
@@ -330,7 +330,7 @@ Semua endpoint `POST` menerima `"lang": "id"` atau `"lang": "en"`.
 python -m pytest tests -q
 ```
 
-137 pengujian: penguraian angka dan satuan, konvensi `1 ons = 100 g`, jebakan
+167 pengujian: penguraian angka dan satuan, konvensi `1 ons = 100 g`, jebakan
 substring ayam/bayam, integritas kode alias, berat beli BDD, penyerapan minyak,
 klasifikasi slot, perilaku batas lunak pada pagu mustahil, batasan variasi,
 loop orkestrator dengan pengganti SEA-LION, dan kelengkapan katalog dwibahasa.

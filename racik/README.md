@@ -144,8 +144,8 @@ Regional fit is 1.0 exact province, 0.6 same island, 0.5 national, 0.2 other.
 `rank_breakdown()` returns every term, so a total can be checked by hand.
 
 The funnel makes the budget story visible. For SD in Central Java, **the cost
-ceiling alone removes 9,084 of 13,525 animal-protein dishes** — two thirds of
-the corpus is priced out before the solver runs.
+ceiling alone removes 9,660 of 13,525 animal-protein dishes** — over seventy per
+cent of them are priced out before the solver runs.
 
 ## The compliance & procurement report
 
@@ -193,6 +193,53 @@ Constraints, verified against AWS documentation rather than assumed:
   `ModelNotReadyException`; the client configures boto3 retries for it.
 
 `pip install boto3` is required only for the Bedrock provider.
+
+## Deploying on a small instance
+
+CP-SAT spends whatever wall-clock you give it. At the full candidate pool it
+never proves optimality, so it always returns at the time limit — which makes
+the *time limit* the latency knob and the *pool size* the quality-per-second
+knob. On a throttled box a smaller pool is both faster and better, because the
+solver stops spreading a fixed search budget over dishes it will never pick.
+
+Measured single-threaded, five days, SD / Jawa Tengah:
+
+| Candidates per slot | Time limit | Wall | Adequacy | Floors relaxed |
+|---|---|---|---|---|
+| 220 | 12 s | 12.4 s | 0.725 | 17 |
+| 60 | 3 s | 3.2 s | 0.860 | 14 |
+| 60 | 4 s | 4.0 s | 0.864 | 14 |
+| 60 | 8 s | 8.2 s | 0.867 | 14 |
+
+So the defaults are derived from the CPU the process actually has, read from
+the cgroup quota rather than `os.cpu_count()` — inside a container the latter
+reports the *host's* cores, and asking for eight CP-SAT workers on a 0.1-vCPU
+share is slower than asking for one.
+
+| Effective CPU | Workers | Candidates / slot | Time limit |
+|---|---|---|---|
+| < 2 cores | 1 | 60 | 4 s |
+| >= 2 cores | up to 8 | 220 | 12 s |
+
+Override any of it per deployment:
+
+```bash
+RACIK_CPU_BUDGET=0.5           # pretend this many cores; picks the profile
+RACIK_CANDIDATES_PER_SLOT=80   # pool size, independent of the profile
+RACIK_SOLVE_SECONDS=6          # wall-clock limit per solve
+```
+
+**Do not set the pool below about 50.** The variety constraints — no repeat
+inside the window, plus the two-per-ingredient-family cap — deadlock beneath it
+and the solve returns `INFEASIBLE`. The measured cliff is between 60 (solves)
+and 40 (does not), and an unpinned infeasible solve reaches the operator as
+"no menu could be built".
+
+The corpus is loaded on a background thread at startup, so the port opens
+immediately and the first caller after a deploy — or after a platform wakes an
+idled instance — does not pay for building 18k dishes. That cost reads as a slow
+solver but is not one: on a free-tier instance the cold start is the dominant
+latency, and no solver setting touches it.
 
 ## The result that matters
 
@@ -313,8 +360,11 @@ dozen separate uploads named some variant of "Tempe Mendoan"; constraining on
 | `scripts/package.py` | Builds the ID and EN release archives |
 | `docs/CODE_MAP.md` | Guided reading order for the codebase |
 | `tests/test_racik.py` | 48 engine tests |
-| `tests/test_orchestrator.py` | 28 orchestration tests |
-| `tests/test_i18n.py` | 26 bilingual-layer tests |
+| `tests/test_transparency.py` | 35 filter-transparency, translation and Bedrock tests |
+| `tests/test_orchestrator.py` | 29 orchestration tests |
+| `tests/test_i18n.py` | 25 bilingual-layer tests |
+| `tests/test_runtime.py` | 16 deployment-profile tests |
+| `tests/test_replan.py` | 14 operator-review tests |
 
 ## API
 
@@ -344,7 +394,7 @@ curl -s localhost:8000/api/plan -H 'Content-Type: application/json' \
 python -m pytest tests -q
 ```
 
-137 tests. The engine suite covers number/unit parsing, the `ons = 100 g`
+167 tests. The engine suite covers number/unit parsing, the `ons = 100 g`
 convention, the ayam/bayam substring trap, alias-code integrity, BDD purchase
 weights, oil absorption, slot classification, soft-floor behaviour under an
 impossible budget, and variety constraints.
