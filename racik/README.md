@@ -481,3 +481,6 @@ AKG 2019 (Permenkes 28/2019) · TKPI 2020 (Kemenkes) · Isi Piringku (Permenkes
 41/2014) · Kemenkes *Pedoman Konversi Berat Matang-Mentah, BDD* (2014) ·
 FAO/INFOODS retention & yield guidance · BGN per-portion budget statements,
 2024–2026 · Bapanas Panel Harga / BI PIHPS · SEA-LION v4.5 (AI Singapore).
+
+See [`docs/MERGE.md`](docs/MERGE.md) for what came from the parallel
+implementation and why the rest of it was discarded.

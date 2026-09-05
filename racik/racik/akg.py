@@ -17,7 +17,10 @@ penyelenggaraan makanan institusi" — institutional catering, i.e. MBG.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 Sex = Literal["male", "female", "any"]
@@ -116,6 +119,26 @@ def blended_band(keys: list[str], key: str = "blend", label: str = "Blended coho
                    sex="any", **agg)
 
 
+@lru_cache(maxsize=1)
+def nutrient_quality() -> dict:
+    """TKPI measurement provenance, from data/nutrient_quality.json.
+
+    Absent or unreadable, every nutrient reads as fully measured, which restores
+    the previous behaviour rather than silently loosening or tightening anything.
+    Regenerate with scripts/build_nutrient_quality.py.
+    """
+    path = Path(__file__).resolve().parents[1] / "data" / "nutrient_quality.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("nutrients", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _measured_fraction(nutrient: str) -> float:
+    entry = nutrient_quality().get(nutrient)
+    return float(entry["measured_fraction"]) if entry else 1.0
+
+
 def binding_band(keys: list[str], nutrient: str = "protein_g") -> AgeBand:
     """The hungriest band in the cohort for ``nutrient`` — who a blend under-serves."""
     return max((AGE_BANDS[k] for k in keys), key=lambda b: getattr(b, nutrient))
@@ -130,8 +153,35 @@ def stage_band(stage: str) -> AgeBand:
 
 
 # Which nutrients are trustworthy enough to constrain on, by default.
-BINDING_NUTRIENTS = MACRO_NUTRIENTS
-ADVISORY_NUTRIENTS = MICRO_NUTRIENTS
+#
+# There are two independent reasons to distrust a nutrient, and a hard floor needs
+# both to hold before it means anything:
+#
+#   is the TARGET right?       the macro/micro split above. Secondary sources
+#                              disagree on the AKG figures for iron and zinc, so
+#                              those stay advisory until someone transcribes the
+#                              Permenkes PDF.
+#   is the MEASUREMENT right?  data/nutrient_quality.json. TKPI marks each value
+#                              measured or imputed, and the split is wide: only
+#                              68% of fibre values were measured, 53% of sodium,
+#                              47% of zinc.
+#
+# Fibre is the case that matters. It is a macro, so the first test passes it, and
+# it was binding — but two thirds of its underlying values are inferred rather
+# than measured. A floor on that column is optimised against noise, and every
+# layer downstream agrees with the result because they all read the same column.
+#
+# Calcium and iron fail the other way round: 99.6% and 99.3% measured, so the food
+# data is solid and only the reference figure is in doubt. They stay advisory, but
+# for a reason that a PDF transcription would fix rather than a lab.
+MEASURED_FRACTION_FLOOR = 0.80
+
+BINDING_NUTRIENTS = tuple(
+    n for n in MACRO_NUTRIENTS if _measured_fraction(n) >= MEASURED_FRACTION_FLOOR
+)
+ADVISORY_NUTRIENTS = tuple(
+    n for n in (MACRO_NUTRIENTS + MICRO_NUTRIENTS) if n not in BINDING_NUTRIENTS
+)
 
 NUTRIENT_META = {
     "energy_kcal": ("Energi", "Energy", "kkal", "verified"),

@@ -1,0 +1,63 @@
+{
+  "_source": "Supabase food_nutrient.is_imputed, TKPI 2020",
+  "_generated": "2026-09-05",
+  "_foods": 1146,
+  "_note": "measured_fraction is the share of PRESENT values that were measured rather than imputed; coverage is the share of foods carrying any value at all.",
+  "nutrients": {
+    "calcium_mg": {
+      "tkpi_code": "calcium_mg",
+      "coverage": 0.9651,
+      "measured_fraction": 0.9964
+    },
+    "carb_g": {
+      "tkpi_code": "carbohydrate_g",
+      "coverage": 1.0,
+      "measured_fraction": 0.9983
+    },
+    "energy_kcal": {
+      "tkpi_code": "energy_kcal",
+      "coverage": 1.0,
+      "measured_fraction": 0.9983
+    },
+    "fat_g": {
+      "tkpi_code": "fat_g",
+      "coverage": 0.9991,
+      "measured_fraction": 0.9948
+    },
+    "fibre_g": {
+      "tkpi_code": "fibre_g",
+      "coverage": 0.8072,
+      "measured_fraction": 0.6757
+    },
+    "iron_mg": {
+      "tkpi_code": "iron_mg",
+      "coverage": 0.9625,
+      "measured_fraction": 0.9927
+    },
+    "protein_g": {
+      "tkpi_code": "protein_g",
+      "coverage": 0.9991,
+      "measured_fraction": 0.9991
+    },
+    "vit_a_mcg": {
+      "tkpi_code": "retinol_mcg",
+      "coverage": 0.4738,
+      "measured_fraction": 0.9871
+    },
+    "sodium_mg": {
+      "tkpi_code": "sodium_mg",
+      "coverage": 0.7539,
+      "measured_fraction": 0.5289
+    },
+    "vit_c_mg": {
+      "tkpi_code": "vitamin_c_mg",
+      "coverage": 0.7478,
+      "measured_fraction": 1.0
+    },
+    "zinc_mg": {
+      "tkpi_code": "zinc_mg",
+      "coverage": 0.6972,
+      "measured_fraction": 0.4743
+    }
+  }
+}

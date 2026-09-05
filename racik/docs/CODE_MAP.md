@@ -39,12 +39,29 @@ all-inclusive program pagu with labour and logistics folded in), and the
 comment explaining why that's a distinct thing from BGN's separate ~70/20/10
 national-pagu split.
 
-### 2. `racik/akg.py` — what a child needs *(148 lines)*
+### 2. `racik/akg.py` — what a child needs *(180 lines)*
 AKG 2019 age bands. The important structure is the **two tiers of trust**:
-`BINDING_NUTRIENTS` (macros, corroborated) versus `ADVISORY_NUTRIENTS` (micros,
-where sources disagree). The micros are computed and displayed but never
-constrain a solve. This split is the single most load-bearing honesty decision
-in the project.
+`BINDING_NUTRIENTS` versus `ADVISORY_NUTRIENTS`. Advisory nutrients are computed
+and displayed but never constrain a solve. This split is the single most
+load-bearing honesty decision in the project.
+
+A nutrient has to clear **two independent tests** to bind, because there are two
+different ways to be wrong about one:
+
+| Test | Question | Source |
+|---|---|---|
+| Target | Is the AKG figure right? | macro/micro split — sources disagree on iron and zinc |
+| Measurement | Is the TKPI value right? | `data/nutrient_quality.json` — measured vs imputed |
+
+The second came from a copy of TKPI that carries a per-value `is_imputed` flag,
+which the shipped CSV does not. It changes one answer: **fibre is a macro and
+used to bind, but only 68% of its underlying values were measured** — a floor on
+that column optimises against noise, and every layer downstream agrees because
+they all read the same column. Sodium is 53% measured, zinc 47%.
+
+It cuts the other way too. Calcium and iron are 99.6% and 99.3% measured, so the
+food data is solid there and only the reference figure is in doubt — they stay
+advisory for a reason a PDF transcription would fix, not a lab.
 
 ### 3. `racik/urt.py` — household measures to grams *(490 lines)*
 The hardest data problem. "2 ons ikan" is 200 g, not 56 g. "1 papan tempe" is
@@ -148,7 +165,18 @@ numbers without their caveats.
 ```bash
 python -m pytest tests -q          # 202 tests, no network, no API key
 python scripts/build_db.py         # rebuild every number from source, ~30 s
+python scripts/province_sweep.py   # plan every province, report what each relaxed
 ```
+
+`province_sweep.py` exists because soft floors change the question. A solve always
+returns a menu, which is right for a cook, but it means a thin region no longer
+announces itself — its plan looks like everyone else's. The sweep prints the
+relaxations per province, so "this province had to give something up" is visible
+instead of implied.
+
+`scripts/build_nutrient_quality.py` regenerates `data/nutrient_quality.json` from
+the annotated TKPI copy. It is the only script that needs network access, and the
+engine never calls it — it reads the committed file.
 
 The test suite is the fastest way to check that this document is honest. Each
 claim above has a test: the `ons = 100 g` convention, the ayam/bayam trap, oil
