@@ -18,6 +18,26 @@ DAY_LABELS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
                  "Saturday", "Sunday"]
 
 
+def slot_payload(dish_, portions: int) -> dict | None:
+    """One tray slot as the frontend expects it.
+
+    Shared by `serialise_plan` and `/api/swap`, which used to build this
+    dict independently -- and drifted, so a swapped dish came back missing
+    a field a whole plan carried.
+    """
+    if dish_ is None:
+        return None
+    return {
+        **dish_.to_dict(),
+        "main_food": dish_.main_food_name,
+        # The redesigned UI resolves substitutions against this code.
+        "main_food_code": dish_.main_food_code,
+        "cost_total_idr": round(dish_.cost_per_portion_idr * portions),
+        "steps": [s.strip() for s in (dish_.steps or "").split(".")
+                  if s.strip()][:8],
+    }
+
+
 def serialise_plan(result: PlanResult, lang: str = DEFAULT_LANG) -> dict:
     lang = norm_lang(lang)
     portions = result.request.portions
@@ -25,16 +45,8 @@ def serialise_plan(result: PlanResult, lang: str = DEFAULT_LANG) -> dict:
 
     days = []
     for day in result.days:
-        slots = {}
-        for slot in SLOTS:
-            dish_ = day.dishes[slot]
-            slots[slot] = None if dish_ is None else {
-                **dish_.to_dict(),
-                "main_food": dish_.main_food_name,
-                "cost_total_idr": round(dish_.cost_per_portion_idr * portions),
-                "steps": [s.strip() for s in (dish_.steps or "").split(".")
-                          if s.strip()][:8],
-            }
+        slots = {slot: slot_payload(day.dishes[slot], portions)
+                 for slot in SLOTS}
         days.append({
             "index": day.day_index,
             "label_id": DAY_LABELS[day.day_index % 7],

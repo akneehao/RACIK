@@ -44,6 +44,17 @@ W_COST = 1
 W_UNDERSPEND = 8
 W_PREFERENCE = 250
 W_QUALITY = 120
+W_PANTRY = 2500        # bonus for a dish that would use up leftover stock, while
+                       # it's still within the days it's usable for — the mirror
+                       # image of W_RECENCY: a positive nudge, day-scoped, not a
+                       # blanket preference (so it fades out once the stock's
+                       # window has passed, same as recency fades back in).
+W_RECENCY = 3000       # penalty for a dish served recently to this province+stage.
+                       # Scaled against W_COST=1 on raw-rupiah cost_terms (typical
+                       # dish cost 1,000-4,000 IDR) rather than against W_PREFERENCE
+                       # /W_QUALITY (0-1 scored bonuses) — those are too small to ever
+                       # outweigh a cost difference, which is what actually decides
+                       # ties between same-slot candidates.
 
 # Override via RACIK_CANDIDATES_PER_SLOT on CPU-constrained hosts (e.g.
 # Render's free 0.1-vCPU tier), where the default search space doesn't
@@ -125,6 +136,18 @@ class PlanRequest:
     enforce_micronutrients: bool = False    # AKG micro values pending verification
     max_solve_seconds: float = 20.0
     random_seed: int = 0
+    recency_weights: dict = field(default_factory=dict)  # dish_id -> 0-1.5+ avoidance
+                                             # weight from history.py (recency x rating)
+    target_overrides: dict = field(default_factory=dict)  # user-set nutrient targets, replaces AKG per key
+    pantry_items: Sequence[dict] = ()       # [{"tkpi_code": str, "usable_within_days": int}]
+                                             # — leftover stock to use up before it's wasted.
+                                             # See history.py's pantry_items() and
+                                             # optimizer's pantry bonus below.
+    extra_dishes: Sequence[Dish] = ()       # school-authored/edited dishes (recipes.py),
+                                             # scoped per kitchen, not part of the shared
+                                             # corpus. Merged into the candidate pool for
+                                             # their slot and run through the exact same
+                                             # gates as every other dish — no special-casing.
 
 
 @dataclass
@@ -279,9 +302,14 @@ class MenuOptimizer:
         budget = request.config.ingredient_budget_idr
         ceiling = budget * COST_CEILING_SHARE
 
+        extra_by_slot: dict[str, list[Dish]] = {s: [] for s in SLOTS}
+        for dish in request.extra_dishes:
+            if dish.slot in extra_by_slot:
+                extra_by_slot[dish.slot].append(dish)
+
         out: dict[str, tuple[list[Dish], CandidateFunnel]] = {}
         for slot in SLOTS:
-            in_slot = self.by_slot[slot]
+            in_slot = self.by_slot[slot] + extra_by_slot[slot]
             funnel = CandidateFunnel(slot=slot, in_slot=len(in_slot),
                                      cost_ceiling_idr=ceiling)
             pool = []
@@ -306,7 +334,19 @@ class MenuOptimizer:
             pool.sort(key=lambda d: -_rank(d, request, targets, budget))
             deduped = _dedupe_by_name(pool)
             funnel.cut_duplicate_name = len(pool) - len(deduped)
-            selected = deduped[:request.candidates_per_slot]
+            # extra_dishes (recipes.py — a school's own request) bypass the
+            # top-N cap: it's a corpus-scale performance safeguard, not a
+            # gate meant to silently drop a specific dish someone asked
+            # for just because it doesn't out-rank thousands of corpus
+            # dishes on one formula. Still fully subject to every hard gate
+            # above (cost ceiling, exclusions) — only the popularity
+            # contest is skipped, not the eligibility check.
+            extra_ids = {d.dish_id for d in extra_by_slot[slot]}
+            capped = deduped[:request.candidates_per_slot]
+            capped_ids = {d.dish_id for d in capped}
+            guaranteed = [d for d in deduped
+                         if d.dish_id in extra_ids and d.dish_id not in capped_ids]
+            selected = capped + guaranteed
             funnel.selected = len(selected)
             funnel.top = [
                 {"dish_id": d.dish_id, "name": d.name, "province": d.province,
@@ -458,6 +498,12 @@ class MenuOptimizer:
 
         band = stage_band(request.stage)
         targets = band.per_meal(request.config.akg_fraction)
+        if request.target_overrides:
+            # A direct user-entered number, not a model guess — see PlanRequest
+            # docstring. Only known nutrient keys are honoured; AKG stays the
+            # default for anything not explicitly overridden.
+            targets = {**targets, **{k: v for k, v in request.target_overrides.items()
+                                     if k in targets and v is not None}}
         binding = list(BINDING_NUTRIENTS)
         if request.enforce_micronutrients:
             binding += ["calcium_mg", "iron_mg", "zinc_mg", "vit_a_mcg", "vit_c_mg"]
@@ -522,10 +568,28 @@ class MenuOptimizer:
         budget_slack: dict[int, cp_model.IntVar] = {}
         penalties: list[cp_model.LinearExpr] = []
 
+        recency_weights = request.recency_weights
+        # tkpi_code -> how many of this plan's leading days it's still good
+        # for. Matched against a dish's main_food_code only (not every
+        # ingredient line) — those aren't loaded for every candidate, by
+        # design (store.py: lines load lazily, only for dishes actually
+        # selected), so the pantry signal is scoped to each dish's single
+        # defining ingredient, the same field variety-family limits use.
+        pantry_by_code = {
+            # `.get(key, 0)` only falls back when the key is *absent* — but
+            # /api/pantry legitimately returns usable_within_days: null for
+            # an item with no expiry set (PantryReportBody's own field is
+            # Optional), so the key is present with value None and int(None)
+            # raised. `or 0` catches both "missing" and "present but None":
+            # no known shelf life means no pantry bonus, not a crash.
+            str(item.get("tkpi_code")): int(item.get("usable_within_days") or 0)
+            for item in request.pantry_items if item.get("tkpi_code")
+        }
+
         for d in days:
             terms = {n: [] for n in binding}
             energy_terms, fat_terms, cost_terms = [], [], []
-            quality_terms, preference_terms = [], []
+            quality_terms, preference_terms, recency_terms, pantry_terms = [], [], [], []
 
             for slot in SLOTS:
                 for i, dish in enumerate(candidates[slot]):
@@ -546,6 +610,22 @@ class MenuOptimizer:
                         int(round(dish.quality.score * W_QUALITY)) * var)
                     preference_terms.append(
                         int(round(_preference(dish, request) * W_PREFERENCE)) * var)
+                    # Nudged, not forbidden: a dish served to this province+
+                    # stage recently costs a penalty, scaled by how recently
+                    # and by how it was rated (history.py) — a well-liked
+                    # dish eases back in sooner than an unrated or poorly
+                    # rated one, and the penalty fades to zero after the
+                    # window regardless of rating.
+                    weight = recency_weights.get(dish.dish_id, 0.0)
+                    if weight:
+                        recency_terms.append(int(round(W_RECENCY * weight)) * var)
+                    # The mirror image: a dish that would use up leftover
+                    # stock gets a bonus, but only for the days that stock
+                    # is actually still good for — day index is 0-based, so
+                    # "usable within 2 days" covers d in {0, 1}.
+                    usable_days = pantry_by_code.get(dish.main_food_code)
+                    if usable_days and d < usable_days:
+                        pantry_terms.append(W_PANTRY * var)
 
             for n in binding:
                 target = int(round(targets[n] * NUTRIENT_SCALE))
@@ -589,6 +669,10 @@ class MenuOptimizer:
             penalties.append(W_COST * sum(cost_terms))
             penalties.append(-sum(preference_terms))
             penalties.append(-sum(quality_terms))
+            if recency_terms:
+                penalties.append(sum(recency_terms))
+            if pantry_terms:
+                penalties.append(-sum(pantry_terms))
 
         model.Minimize(sum(penalties))
 

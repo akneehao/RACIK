@@ -1,7 +1,7 @@
 // utils.js
 // Small helpers used across every module: currency formatting, the toast
-// notification, screen/tab visibility toggling, the reusable star-rating
-// widget, and dish/ingredient name display (cleaning + English glossing).
+// notification, screen/tab visibility toggling, and dish/ingredient name
+// display (cleaning + English glossing).
 
 import { state } from './state.js';
 
@@ -122,23 +122,6 @@ export function setOnboardingStep(n) {
     const num = parseInt(s.dataset.step, 10);
     s.classList.toggle('active', num === n);
     s.classList.toggle('done', num < n);
-  });
-}
-
-/**
- * Turn a "★★★★★" placeholder element into a clickable star-rating widget.
- * Call once per element at startup.
- */
-export function setupStarRating(elementId) {
-  const el = document.getElementById(elementId);
-  if (!el) return;
-  const chars = el.textContent.split('');
-  el.innerHTML = chars.map((c, i) => `<span data-i="${i}">${c}</span>`).join('');
-  el.addEventListener('click', (e) => {
-    const span = e.target.closest('span');
-    if (!span) return;
-    const idx = parseInt(span.dataset.i, 10);
-    el.querySelectorAll('span').forEach((s, i) => s.classList.toggle('on', i <= idx));
   });
 }
 

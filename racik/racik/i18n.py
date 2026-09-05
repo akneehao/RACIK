@@ -67,12 +67,19 @@ STRINGS: dict[str, dict[str, str]] = {
         # ---- rule-based fallback answer
         "plan.header": (
             "Menu {days} hari untuk {stage}, {portions} porsi/hari{province}."),
+        "plan.method": (
+            "Racik memeriksa {candidates} kombinasi resep yang memenuhi pagu dan "
+            "preferensi, lalu memilih kombinasi dengan gizi terbaik per rupiah "
+            "untuk setiap hari."),
         "plan.province": ", preferensi {province}",
         "plan.cost": (
             "Biaya bahan rata-rata Rp{cost} per porsi (pagu bahan Rp{budget}). "
             "Pemenuhan AKG rata-rata {adequacy}."),
         "plan.day": (
             "Hari {day}: Rp{cost} · {kcal} kkal · {protein} g protein · AKG {adequacy}"),
+        "plan.relax_summary": (
+            "Menu ini memenuhi {adequacy} target gizi rata-rata; berikut hari "
+            "yang sedikit di bawah target:"),
         "plan.relax_header": "Batas gizi yang dilonggarkan:",
         "plan.relax_row": (
             "  · Hari {day} {nutrient}: kurang {short} dari {target} ({share})"),
@@ -83,7 +90,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "[Orkestrator berhenti: {reason}. Menampilkan hasil alat terakhir: "
             "{tool}.]"),
         "error.sealion": (
-            "[SEA-LION tidak dapat dihubungi: {error}. Menjawab dengan "
+            "[SEA-LION tidak dapat dihubungi: {error} Menjawab dengan "
             "perencana deterministik.]"),
         # ---- Agen Gizi / Agen Biaya / Validator (generate pipeline)
         "agent.gizi.rationale_default": (
@@ -154,12 +161,19 @@ STRINGS: dict[str, dict[str, str]] = {
             "{nutrient} on day {day}, short by {share}."),
         "plan.header": (
             "A {days}-day menu for {stage}, {portions} portions/day{province}."),
+        "plan.method": (
+            "Racik checked {candidates} recipe combinations that fit the budget "
+            "and preferences, then picked the one with the best nutrition per "
+            "rupiah for each day."),
         "plan.province": ", regional preference {province}",
         "plan.cost": (
             "Mean ingredient cost Rp{cost} per portion (ingredient budget "
             "Rp{budget}). Mean AKG adequacy {adequacy}."),
         "plan.day": (
             "Day {day}: Rp{cost} · {kcal} kcal · {protein} g protein · AKG {adequacy}"),
+        "plan.relax_summary": (
+            "This menu meets {adequacy} of nutrition targets on average; "
+            "here's where it falls a little short:"),
         "plan.relax_header": "Relaxed nutrient floors:",
         "plan.relax_row": (
             "  · Day {day} {nutrient}: short {short} of {target} ({share})"),
@@ -169,7 +183,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "[Orchestrator stopped: {reason}. Showing the last tool result: "
             "{tool}.]"),
         "error.sealion": (
-            "[SEA-LION could not be reached: {error}. Answering with the "
+            "[SEA-LION could not be reached: {error} Answering with the "
             "deterministic planner.]"),
         # ---- Agen Gizi / Agen Biaya / Validator (generate pipeline)
         "agent.gizi.rationale_default": (

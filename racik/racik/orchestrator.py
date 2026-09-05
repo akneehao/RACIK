@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional
 from .agents import agent_biaya, agent_gizi, validate_plan
 from .akg import BINDING_NUTRIENTS, NUTRIENT_META, SCHOOL_STAGES, STAGE_LABELS, stage_band
 from .config import MBG, SLOTS, MBGConfig
+from .history import PlanHistory
 from .i18n import DEFAULT_LANG, LANG_NAMES, norm_lang, t
 from .nutrition import COMPONENT_ID_BASE
 from .optimizer import MenuOptimizer, PlanRequest, PlanResult
@@ -78,6 +79,14 @@ search_dishes. For shopping quantities, call procurement_list.
 the Indonesian name and put the gloss beside it, never instead of it.
 - Call explain_candidates when asked why a dish was or was not chosen, or what \
 the filtering rules are.
+- Call propose_recipe when asked to design or add a new dish that is not in the \
+corpus. Choose plausible ingredients and quantities yourself, written the way a \
+cook would list them (e.g. "Ayam potong 150 g") — the tool then computes the real \
+nutrition and cost from what you wrote, the same deterministic way any corpus \
+recipe is computed. Pass province and stage when the user named them — that is \
+also the scope the draft would be saved under, so leave either blank rather than \
+guessing if the message did not say. Always tell the user this is an unsaved \
+draft that needs a kitchen operator's review before it can be used in a menu.
 
 How to answer:
 - Reply in the language the user wrote in. Indonesian input gets an Indonesian \
@@ -253,6 +262,45 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_recipe",
+            "description": ("Draft a brand-new dish that is not in the corpus, by "
+                            "writing its ingredient lines with quantities the way "
+                            "a cook would (e.g. 'Ayam potong 150 g'). The tool "
+                            "computes the real nutrition and cost from what you "
+                            "write, the same deterministic way any corpus recipe "
+                            "is computed — you never state the resulting numbers "
+                            "yourself, you only choose the ingredients and "
+                            "quantities. The result is an unsaved draft for a "
+                            "kitchen operator to review."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The dish's name."},
+                    "ingredient_lines": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": ("Each line like 'Ayam potong 150 g' or "
+                                        "'Bawang merah 10 g' — a name and an "
+                                        "explicit quantity with unit.")},
+                    "steps": {"type": "string", "description": "Optional cooking steps."},
+                    "province": {"type": "string",
+                                 "description": "Regional attribution, if the "
+                                                "user named a province — this "
+                                                "is also the scope the draft "
+                                                "would save under, so leave it "
+                                                "blank rather than guessing."},
+                    "stage": {"type": "string", "enum": _STAGE_ENUM,
+                             "description": "School stage this dish is for, "
+                                            "if the user said — also part of "
+                                            "the save scope, leave blank if "
+                                            "unclear."},
+                },
+                "required": ["name", "ingredient_lines"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "nutrition_reference",
             "description": ("AKG 2019 per-meal targets for a school stage (one MBG "
                             "meal is about one third of daily AKG), and which "
@@ -287,18 +335,37 @@ class OrchestratorResult:
     answer: str
     trace: list[ToolInvocation] = field(default_factory=list)
     plan: Optional[dict] = None          # last plan payload, for the UI to render
+    resolved_request: Optional[dict] = None  # exact params plan_menu was called
+                                          # with — lets the UI re-fetch the full
+                                          # /api/plan render for the same request
+                                          # the agent actually reasoned about
     model: str = ""
     mode: str = "sealion"                # "sealion" | "fallback"
     steps: int = 0
     stopped_because: str = "completed"
     usage: dict = field(default_factory=dict)
+    # Rupiah amounts / percentages the free-text answer states that don't
+    # trace back to any tool result in this conversation — see
+    # _unverified_numbers(). The trace/plan data is always exactly what a
+    # tool returned; this field is the honest admission that the prose
+    # summary wrapped around it is a well-behaved but *unverified* model
+    # paraphrase, not something the code guarantees correct the way it
+    # guarantees the structured data. A soft signal, not a rejection.
+    unverified_numbers: list[str] = field(default_factory=list)
+    # Set only when a configured LLM was actually called and failed
+    # (expired credentials, throttling, network) — the technical reason,
+    # for a tooltip or log, kept out of `answer` itself. None when no
+    # provider is configured at all, since that's not a failure to explain.
+    fallback_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
             "answer": self.answer, "model": self.model, "mode": self.mode,
             "steps": self.steps, "stopped_because": self.stopped_because,
             "trace": [t.to_dict() for t in self.trace],
-            "plan": self.plan, "usage": self.usage,
+            "plan": self.plan, "resolved_request": self.resolved_request,
+            "usage": self.usage, "unverified_numbers": self.unverified_numbers,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -326,7 +393,8 @@ class RacikOrchestrator:
     def __init__(self, store: RacikStore, optimizer: MenuOptimizer,
                  client: Optional[SeaLionClient] = None,
                  max_steps: int = MAX_STEPS,
-                 price_table: Optional[PriceTable] = None):
+                 price_table: Optional[PriceTable] = None,
+                 history: Optional["PlanHistory"] = None):
         self.store = store
         self.optimizer = optimizer
         self.client = client or SeaLionClient()
@@ -334,8 +402,12 @@ class RacikOrchestrator:
         # Real per-province market data (WFP retail survey) for Agen Biaya —
         # see agents.py's regional_cost_index handling.
         self.price_table = price_table or PriceTable.load()
+        # Cross-request memory: what this scope was served recently, and how the
+        # kitchen rated it. Feeds the optimizer's variety penalty — see history.py.
+        self.history = history
         self._plan_cache: dict[str, PlanResult] = {}
         self._last_plan_payload: Optional[dict] = None
+        self._last_resolved_request: Optional[dict] = None
         self._translator = None
         self._provinces = [p for p, _, _ in store.provinces()]
         self.tools: dict[str, Callable[..., dict]] = {
@@ -347,6 +419,7 @@ class RacikOrchestrator:
             "nutrition_reference": self._tool_nutrition_reference,
             "translate_dishes": self._tool_translate_dishes,
             "explain_candidates": self._tool_explain_candidates,
+            "propose_recipe": self._tool_propose_recipe,
         }
 
     # ------------------------------------------------------------ entry point
@@ -361,9 +434,15 @@ class RacikOrchestrator:
         except SeaLionNotConfigured:
             return self._fallback(question, lang)
         except SeaLionError as exc:
+            # Keep the technical reason (AWS/network detail) out of the
+            # answer body — the "basic mode" badge already tells a kitchen
+            # operator, in plain language, that a rule-based planner
+            # answered instead. A raw AWS exception message as the literal
+            # first thing they read is alarming and means nothing to them;
+            # it's still available via fallback_reason for a tooltip or
+            # server log, just not shoved into the primary reading flow.
             result = self._fallback(question, lang)
-            result.answer = (t(lang, "error.sealion", error=exc)
-                             + "\n\n" + result.answer)
+            result.fallback_reason = t(lang, "error.sealion", error=exc)
             return result
 
     # ------------------------------------------------------------ agent loop
@@ -418,8 +497,10 @@ class RacikOrchestrator:
 
         return OrchestratorResult(
             answer=answer, trace=trace, plan=self._last_plan_payload,
+            resolved_request=self._last_resolved_request,
             model=self.client.model, mode="sealion", steps=step,
             stopped_because=stopped, usage=usage_total,
+            unverified_numbers=_unverified_numbers(answer, trace),
         )
 
     def _invoke(self, call: ToolCall, trace: list[ToolInvocation]) -> dict:
@@ -562,6 +643,40 @@ class RacikOrchestrator:
             exclude_terms=[t for t in (exclude_terms or []) if str(t).strip()])
         return self.optimizer.explain_candidates(request)
 
+    def _tool_propose_recipe(self, name: str, ingredient_lines: list[str],
+                             steps: str = "", province: str = "",
+                             stage: str = "") -> dict:
+        from .recipes import compute_dish
+        lines = [str(x) for x in (ingredient_lines or []) if str(x).strip()][:40]
+        province = _closest_province(province, self._provinces)
+        stage = stage if stage in SCHOOL_STAGES else ""
+        dish = compute_dish(-1, name, lines, steps=steps, province=province)
+        if dish is None:
+            return {"error": ("Could not compute a dish from these ingredient "
+                              "lines — they may not resolve to recognisable "
+                              "ingredients, or the mix doesn't classify into a "
+                              "tray slot (staple/hewani/nabati/sayur/buah). Try "
+                              "clearer ingredient names and explicit quantities.")}
+        return {
+            "draft": dish.to_dict(),
+            "ingredient_lines": lines,
+            "steps": steps,
+            # What to save the draft under — not necessarily the operator's
+            # current form selection. A blank field here means the user
+            # didn't say, not that it defaults to whatever's on screen.
+            "suggested_scope": {"province": province, "stage": stage},
+            "ingredients": [
+                {"raw": ln.parsed.raw,
+                 "tkpi_name": ln.food_name if ln.matched else "",
+                 "gross_g": round(ln.gross_g, 1), "cost_idr": round(ln.cost_idr),
+                 "matched": ln.matched}
+                for ln in dish.lines
+            ],
+            "note": ("Unsaved draft, computed the same way any corpus recipe is "
+                     "— from the ingredient lines above. A kitchen operator must "
+                     "review and save it before it can be planned into a menu."),
+        }
+
     def _tool_nutrition_reference(self, stage: str) -> dict:
         band = stage_band(stage)
         meal = band.per_meal(MBG.akg_fraction)
@@ -596,12 +711,22 @@ class RacikOrchestrator:
             regional_cost_index=self.price_table.regional_index_for(province),
         )
         island = self.store.island_of(province) if province else ""
+        weights = (self.history.recency_weights(province, stage)
+                  if self.history else {})
         request = PlanRequest(
             days=days, stage=stage, portions=portions, province=province,
             island=island, config=config,
             exclude_terms=[t for t in (exclude_terms or []) if str(t).strip()],
             max_solve_seconds=10.0,
+            recency_weights=weights,
         )
+        self._last_resolved_request = {
+            "days": days, "stage": stage, "portions": portions,
+            "province": province, "island": island,
+            "budget_per_portion_idr": config.budget_per_portion_idr,
+            "ingredient_budget_share": config.ingredient_budget_share,
+            "exclude_terms": request.exclude_terms,
+        }
         key = json.dumps({
             "d": days, "s": stage, "p": portions, "prov": province,
             "b": config.budget_per_portion_idr,
@@ -784,6 +909,7 @@ class RacikOrchestrator:
                                   portions=portions, province=province_r,
                                   resolved=resolved, trace=trace)
         self._persist_served(state, run_id, result)
+        self._record_rating_history(result, province_r, resolved_stage)
         plan_payload["run_id"] = run_id
 
         return GenerateResult(run_id=run_id, plan=plan_payload, trace=trace,
@@ -829,6 +955,7 @@ class RacikOrchestrator:
         day_payload["index"] = day_index      # report under the original day's slot
         day_payload["procurement"] = self._procurement_payload(result)["by_day"][0]
         self._persist_served(state, run_id, result, day_index_override=day_index)
+        self._record_rating_history(result, resolved["province"], resolved["stage"])
         return day_payload
 
     def _procurement_payload(self, result: PlanResult) -> dict:
@@ -851,6 +978,28 @@ class RacikOrchestrator:
                 for day in result.days
             ],
         }
+
+    def _record_rating_history(self, result: PlanResult, province: str,
+                               stage: str) -> None:
+        """Tell the rating store what this scope was just served.
+
+        Two history stores coexist and they answer different questions.
+        StateStore's served log is the operator-facing record of what a run
+        contained; PlanHistory is the one the *next* solve reads back as a
+        soft repetition penalty, weighted by how the kitchen rated each dish
+        (history.py). Without this call the rating loop is only half wired:
+        /api/rate writes a score, the optimizer asks for weights, and gets
+        nothing back, because recency_weights keys everything off a serving
+        that was never recorded on this path.
+        """
+        if self.history is None:
+            return
+        served = [dish_.dish_id
+                  for day in result.days
+                  for dish_ in day.dishes.values()
+                  if dish_ is not None and dish_.dish_id < COMPONENT_ID_BASE]
+        if served:
+            self.history.record(province, stage, served)
 
     @staticmethod
     def _persist_served(state: StateStore, run_id: int, result: PlanResult,
@@ -892,13 +1041,75 @@ class RacikOrchestrator:
                                     time.monotonic() - started))
         return OrchestratorResult(
             answer=_render_plan_text(payload, params, lang),
-            trace=trace, plan=payload, model="rule-based fallback",
+            trace=trace, plan=payload,
+            resolved_request=self._last_resolved_request,
+            model="rule-based fallback",
             mode="fallback", steps=1,
             stopped_because="sea-lion unavailable",
         )
 
 
 # ---------------------------------------------------------------- helpers
+
+
+_RUPIAH_RE = re.compile(r"Rp\.?\s*(\d+(?:[.,]\d+)*)")
+_PERCENT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
+
+
+def _flatten_numbers(obj: object) -> set[float]:
+    """Every numeric leaf value inside a tool result, recursively — the
+    ground truth an answer's stated rupiah/percentage figures should trace
+    back to."""
+    numbers: set[float] = set()
+    if isinstance(obj, bool):
+        return numbers                    # bool is an int subclass; not a figure
+    if isinstance(obj, (int, float)):
+        numbers.add(round(float(obj)))
+        if 0 <= obj <= 2:
+            # A 0-1 fraction (e.g. mean_adequacy: 0.968) is almost always
+            # narrated as a percentage ("97%") — without this, every
+            # ordinary, correct percentage mention would be flagged.
+            numbers.add(round(float(obj) * 100))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            numbers |= _flatten_numbers(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            numbers |= _flatten_numbers(v)
+    return numbers
+
+
+def _unverified_numbers(answer: str, trace: list["ToolInvocation"]) -> list[str]:
+    """Rupiah amounts and percentages the answer states that don't match
+    any number in this conversation's tool results, within ±1 rounding
+    tolerance.
+
+    Deliberately soft and narrow: never blocks or edits the answer, only
+    checks the two figure types most likely to be scrutinised (cost,
+    adequacy). False positives are expected — a reader-obvious derivation
+    like "50 portions x Rp6,976" won't appear verbatim in any tool result
+    either — so this is reported as an honest "could not be matched"
+    admission, never as an accusation of a wrong number.
+    """
+    ground_truth: set[float] = set()
+    for call in trace:
+        ground_truth |= _flatten_numbers(call.result)
+    if not ground_truth:
+        return []
+
+    unmatched: list[str] = []
+    for raw in _RUPIAH_RE.findall(answer):
+        digits = raw.replace(".", "").replace(",", "")
+        if not digits.isdigit():
+            continue
+        n = int(digits)
+        if not any(abs(n - g) <= 1 for g in ground_truth):
+            unmatched.append(f"Rp{raw}")
+    for raw in _PERCENT_RE.findall(answer):
+        n = round(float(raw.replace(",", ".")))
+        if not any(abs(n - g) <= 1 for g in ground_truth):
+            unmatched.append(f"{raw}%")
+    return unmatched
 
 
 def _assistant_turn(reply: ChatResult) -> dict:
@@ -955,6 +1166,8 @@ def _render_plan_text(payload: dict, params: dict,
         t(lang, "plan.header", days=len(payload["days"]),
           stage=payload["stage"], portions=params.get("portions", 100),
           province=province),
+        t(lang, "plan.method", candidates=summary["candidates"]),
+        "",
         t(lang, "plan.cost",
           cost=f"{summary['mean_cost_per_portion_idr']:,.0f}",
           budget=f"{summary['ingredient_budget_idr']:,.0f}",
@@ -968,7 +1181,8 @@ def _render_plan_text(payload: dict, params: dict,
                        adequacy=f"{day['adequacy'] * 100:.0f}%"))
         lines.append("    " + " · ".join(v for v in day["dishes"].values() if v))
     if payload["relaxations"]:
-        lines += ["", t(lang, "plan.relax_header")]
+        lines += ["", t(lang, "plan.relax_summary",
+                        adequacy=f"{summary['mean_adequacy'] * 100:.0f}%")]
         for r in payload["relaxations"][:5]:
             lines.append(t(lang, "plan.relax_row", day=r["day"],
                            nutrient=r["nutrient"], short=r["short_by"],

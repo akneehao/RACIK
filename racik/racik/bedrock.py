@@ -248,33 +248,40 @@ def _to_chat_result(body: dict) -> ChatResult:
 def make_client() -> SeaLionClient:
     """Pick the LLM provider from the environment.
 
-    RACIK_LLM_PROVIDER = openai | anthropic | bedrock | bedrock-sealion-import
-                          | gateway | sealion   (default: sealion)
+    RACIK_LLM_PROVIDER = openai | anthropic | bedrock | bedrock_native
+                          | bedrock-sealion-import | gateway | sealion
+                          (default: sealion)
 
-      openai                  OPENAI_API_KEY, OPENAI_MODEL (optional) —
-                               OpenAI's Chat Completions API. No new client
-                               needed: it's the same OpenAI-compatible shape
-                               SeaLionClient already speaks, just pointed at
-                               api.openai.com.
+      openai                  OPENAI_API_KEY, OPENAI_MODEL (optional) - the
+                               same OpenAI-compatible shape SeaLionClient
+                               already speaks, pointed at api.openai.com.
       anthropic               ANTHROPIC_API_KEY, ANTHROPIC_MODEL (optional)
-                               — direct Anthropic Messages API, no AWS
-                               account needed. Useful for testing the agent
-                               pipeline's live-LLM path independently of
-                               Bedrock credential availability; see
-                               anthropic_client.py.
-      bedrock                 BEDROCK_MODEL_ID, AWS_REGION  — Converse API,
-                               any standard Bedrock foundation model
-                               (Claude, Nova, Llama, ...). This is what
-                               ordinary "I have Bedrock access" means; prefer
-                               it unless you specifically need SEA-LION.
-      bedrock-sealion-import  BEDROCK_MODEL_ARN, AWS_REGION — boto3
-                               InvokeModel against a SEA-LION model brought in
-                               via Bedrock Custom Model Import (this module's
-                               BedrockSeaLionClient, above). Narrower and
-                               tool-calling is not guaranteed — see the module
+                               - direct Anthropic Messages API, no AWS
+                               account needed. See anthropic_client.py.
+      bedrock                 AWS_REGION plus ONE of:
+                               BEDROCK_MODEL_ID   -> Converse API against a
+                                 stock catalog model (Claude, Nova, Llama).
+                               BEDROCK_MODEL_ARN  -> SEA-LION brought in via
+                                 Custom Model Import.
+                               The two branches that merged here used the bare
+                               name "bedrock" for different things, so it now
+                               resolves on which variable is actually set
+                               rather than breaking one team's configuration.
+      bedrock_native          BEDROCK_NATIVE_MODEL_ID, AWS_REGION - Converse
+                               against a stock catalog model, via
+                               bedrock_native.py.
+      bedrock-sealion-import  BEDROCK_MODEL_ARN, AWS_REGION - boto3
+                               InvokeModel against a Custom Model Import
+                               SEA-LION (BedrockSeaLionClient, above).
+                               Tool-calling is not guaranteed; see the module
                                docstring.
-      gateway   SEALION_BASE_URL (Bedrock Access Gateway) — OpenAI-compatible
-      sealion   SEALION_API_KEY                           — hosted API
+      gateway   SEALION_BASE_URL (Bedrock Access Gateway) - OpenAI-compatible
+      sealion   SEALION_API_KEY                           - hosted API
+
+    bedrock_converse.py and bedrock_native.py are two implementations of the
+    same Converse call, one from each branch, and both carry their own tests.
+    Both are kept for now rather than deleting tested code mid-merge; retiring
+    one is a follow-up, not a merge decision.
     """
     provider = os.environ.get("RACIK_LLM_PROVIDER", "").strip().lower()
     base_url = os.environ.get("SEALION_BASE_URL", "").strip()
@@ -288,7 +295,19 @@ def make_client() -> SeaLionClient:
     if provider == "anthropic" or (not provider and os.environ.get("ANTHROPIC_API_KEY")):
         from .anthropic_client import AnthropicClient
         return AnthropicClient()
-    if provider == "bedrock" or (not provider and os.environ.get("BEDROCK_MODEL_ID")):
+    if provider in ("bedrock_native", "bedrock-native") or (
+            not provider and os.environ.get("BEDROCK_NATIVE_MODEL_ID")):
+        from .bedrock_native import BedrockNativeClient
+        return BedrockNativeClient()
+    if provider == "bedrock":
+        # Disambiguate on the variable that is set. One branch meant Converse
+        # against a catalog model by "bedrock", the other meant a Custom Model
+        # Import SEA-LION; both configurations still work unchanged.
+        if os.environ.get("BEDROCK_MODEL_ARN") and not os.environ.get("BEDROCK_MODEL_ID"):
+            return BedrockSeaLionClient()
+        from .bedrock_converse import BedrockConverseClient
+        return BedrockConverseClient()
+    if not provider and os.environ.get("BEDROCK_MODEL_ID"):
         from .bedrock_converse import BedrockConverseClient
         return BedrockConverseClient()
     if provider == "bedrock-sealion-import" or (

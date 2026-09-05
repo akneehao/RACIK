@@ -18,16 +18,34 @@ import pytest
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    """A fresh app per test: swaps the module-level StateStore singleton for
-    one backed by a temp file, so runs from different tests never collide."""
+    """A fresh app per test: swaps the module-level StateStore and
+    PlanHistory singletons for temp-file ones, so runs from different tests
+    never collide."""
     from fastapi.testclient import TestClient
     import racik.api as api_module
+    from racik.history import PlanHistory
     from racik.statedb import StateStore
 
     fresh_state = StateStore(path=tmp_path / "state.db")
     api_module._state.cache_clear()
     monkeypatch.setattr(api_module, "_state", lambda: fresh_state)
-    return TestClient(api_module.app)
+
+    # Same treatment for the rating store: _orchestrator() reads it on every
+    # generate, so leaving the real one in place would let one test's menu
+    # become the next test's repetition penalty.
+    fresh_history = PlanHistory(path=tmp_path / "history.db")
+    api_module._history.cache_clear()
+    monkeypatch.setattr(api_module, "_history", lambda: fresh_history)
+
+    # _orchestrator() is lru_cached and takes its history at construction,
+    # so without this it keeps handing back an orchestrator bound to a
+    # previous test's PlanHistory -- one that teardown has already closed.
+    api_module._orchestrator.cache_clear()
+
+    yield TestClient(api_module.app)
+
+    api_module._orchestrator.cache_clear()
+    fresh_history.close()
 
 
 # ---------------------------------------------------------------- /api/generate
@@ -265,3 +283,81 @@ def test_repeated_generate_avoids_recently_served_recipe_dishes(client):
 
     overlap = recipe_dish_ids(first) & recipe_dish_ids(second)
     assert not overlap, f"dishes repeated despite menu history: {overlap}"
+
+
+# ------------------------------------------------- ratings feed repetition
+
+def test_generate_records_what_it_served_into_the_rating_store(client):
+    """The operator half of the repetition loop only works if something
+    tells PlanHistory what was served.
+
+    /api/rate writes a score against a dish id, and recency_weights looks
+    that score up *while walking the served log* -- so with an empty log it
+    returns {} no matter how many ratings exist, and every star an operator
+    clicks is silently discarded. /api/plan always recorded; /api/generate,
+    which is what the main frontend calls, did not.
+    """
+    import racik.api as api_module
+
+    history = api_module._history()
+    assert history.recency_weights("Jawa Tengah", "sd") == {}
+
+    body = client.post("/api/generate", json={
+        "days": 2, "portions": 30, "province": "Jawa Tengah", "stage": "sd",
+        "budget_mode": "per_portion", "budget_value": 10_000}).json()
+
+    weights = history.recency_weights("Jawa Tengah", "sd")
+    assert weights, "generate() served a menu but recorded nothing to rate against"
+
+    served = {slot["dish_id"]
+              for day in body["plan"]["days"]
+              for slot in day["slots"].values() if slot}
+    assert set(weights) <= served
+
+
+def test_a_rating_changes_the_weight_the_next_solve_sees(client):
+    """End to end: solve, rate a served dish 1/5, and the avoidance weight
+    for that dish goes up while an unrated one stays neutral. This is the
+    whole user-visible claim -- 'rating a meal influences repetition'."""
+    import racik.api as api_module
+
+    body = client.post("/api/generate", json={
+        "days": 2, "portions": 30, "province": "Jawa Tengah", "stage": "sd",
+        "budget_mode": "per_portion", "budget_value": 10_000}).json()
+
+    history = api_module._history()
+    served = sorted({slot["dish_id"]
+                     for day in body["plan"]["days"]
+                     for slot in day["slots"].values() if slot}
+                    & set(history.recency_weights("Jawa Tengah", "sd")))
+    assert len(served) >= 2, "need two served dishes to compare"
+    disliked, untouched = served[0], served[1]
+
+    before = history.recency_weights("Jawa Tengah", "sd")
+    res = client.post("/api/rate", json={
+        "dish_id": disliked, "rating": 1, "province": "Jawa Tengah", "stage": "sd"})
+    assert res.status_code == 200
+    assert res.json()["mean_rating"] == 1.0
+
+    after = history.recency_weights("Jawa Tengah", "sd")
+    assert after[disliked] > before[disliked]
+    assert after[untouched] == pytest.approx(before[untouched], rel=1e-3)
+
+
+def test_a_rating_is_scoped_and_does_not_leak_across_provinces(client):
+    """A kitchen in Jawa Tengah disliking a dish must not push it out of
+    another province's rotation -- the scope key is the only thing keeping
+    one region's verdict off another's menu."""
+    import racik.api as api_module
+
+    client.post("/api/generate", json={
+        "days": 1, "portions": 30, "province": "Jawa Tengah", "stage": "sd",
+        "budget_mode": "per_portion", "budget_value": 10_000})
+    history = api_module._history()
+    dish_id = next(iter(history.recency_weights("Jawa Tengah", "sd")))
+
+    client.post("/api/rate", json={
+        "dish_id": dish_id, "rating": 1, "province": "Jawa Tengah", "stage": "sd"})
+
+    assert history.rating("Jawa Tengah", "sd", dish_id) == 1.0
+    assert history.rating("Papua", "sd", dish_id) is None

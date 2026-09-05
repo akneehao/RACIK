@@ -200,10 +200,41 @@ function initPeopleStepper() {
   });
 }
 
+// Where the chip-built clause ends and anything the operator typed begins.
+// Kept as a marker rather than parsed back out of the text, so a chip can be
+// un-toggled without disturbing free text that happens to mention the same word.
+const CHIP_CLAUSE = /^tanpa [^.\n]*\.\s*/;
+
 function initNotesField() {
   const el = document.getElementById('notesInput');
   if (!el) return;
   el.addEventListener('input', () => { state.notes = el.value; });
+
+  // Quick-pick restrictions. These write plain text into the same notes
+  // field rather than a separate parameter, because the notes field is what
+  // Agen Gizi actually reads — a chip is a shortcut for typing, not a second
+  // input path that could disagree with what the operator sees.
+  //
+  // `data-term` is the Indonesian word on purpose: exclude_terms is a text
+  // filter matched against Indonesian dish and ingredient names, so "shrimp"
+  // would match nothing. The visible label stays English like the rest of
+  // this screen. "tanpa" is the marker the rule-based fallback in agents.py
+  // looks for, so the chips work with no model configured.
+  const chips = document.getElementById('allergyChips');
+  if (!chips) return;
+  const chosen = new Set();
+  chips.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const term = chip.dataset.term;
+      if (chosen.has(term)) { chosen.delete(term); } else { chosen.add(term); }
+      chip.classList.toggle('selected', chosen.has(term));
+
+      const rest = el.value.replace(CHIP_CLAUSE, '');
+      const clause = chosen.size ? `tanpa ${[...chosen].join(', ')}. ` : '';
+      el.value = clause + rest;
+      state.notes = el.value;
+    });
+  });
 }
 
 function initGenerateButton(onGenerate) {

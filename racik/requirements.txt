@@ -6,8 +6,8 @@ pandas>=2.0
 openpyxl>=3.1
 pytest>=8.0
 httpx>=0.27          # required by fastapi.testclient.TestClient (tests only)
-python-dotenv>=1.0   # loads racik/.env — see config.py
+python-dotenv>=1.0   # loads racik/.env - see config.py
 
-# Optional: only for the Amazon Bedrock providers (BedrockConverseClient in
-# bedrock_converse.py, BedrockSeaLionClient in bedrock.py)
-# boto3>=1.34
+# AWS Bedrock. Required rather than optional now: bedrock_native.py is the
+# default provider, and the deployment blueprints assume it is present.
+boto3>=1.34

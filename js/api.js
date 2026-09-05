@@ -50,6 +50,13 @@ export const api = {
   /** Full ingredient list, steps and gram provenance for one dish. */
   dish: (dishId) => request('GET', `/api/dish/${dishId}`),
 
+  /** An operator's 1-5 star verdict on a dish they actually served. This is
+   * not cosmetic: history.py folds the score into the recency weight the
+   * next solve is penalised by, so a dish the kids liked comes back sooner
+   * and one they didn't is pushed further out. Scoped by province/stage
+   * because a kitchen's verdict shouldn't leak into another region's menu. */
+  rate: (body) => request('POST', '/api/rate', body),
+
   /** Short English glosses for a batch of Indonesian dish names — cached and
    * batched server-side, so calling this again with the same names is free. */
   translateDishNames: (names) => request('POST', '/api/translate', { names }),

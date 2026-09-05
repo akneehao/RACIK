@@ -7,6 +7,7 @@ fetched on demand for costing and procurement.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -50,6 +51,13 @@ class RacikStore:
                 f"{self.path} not found — run `python scripts/build_db.py` first")
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # FastAPI runs sync endpoints in a thread pool; this connection is
+        # shared (check_same_thread=False) so two requests can enter it at
+        # once — e.g. the UI fetching every dish in a plan in parallel for
+        # its ingredient index. Concurrent calls with no serialization
+        # intermittently raised "bad parameter or other API misuse" (the
+        # same failure mode fixed the same way in history.py's PlanHistory).
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------ dishes
     def load_dishes(self, min_quality: float = 0.0,
@@ -60,16 +68,19 @@ class RacikStore:
             slots = list(slots)
             sql += f" AND slot IN ({','.join('?' * len(slots))})"
             params += slots
-        return [_row_to_dish(row) for row in self.conn.execute(sql, params)]
+        with self._lock:
+            return [_row_to_dish(row) for row in self.conn.execute(sql, params)]
 
     def dish(self, dish_id: int) -> Optional[Dish]:
-        row = self.conn.execute(
-            "SELECT * FROM dishes WHERE dish_id = ?", (dish_id,)).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM dishes WHERE dish_id = ?", (dish_id,)).fetchone()
         return _row_to_dish(row) if row else None
 
     def lines(self, dish_id: int) -> list[StoredLine]:
-        rows = self.conn.execute(
-            "SELECT * FROM dish_lines WHERE dish_id = ? ORDER BY seq", (dish_id,))
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM dish_lines WHERE dish_id = ? ORDER BY seq", (dish_id,)).fetchall()
         return [
             StoredLine(
                 seq=r["seq"], raw=r["raw"], name=r["name"],
@@ -104,16 +115,18 @@ class RacikStore:
 
     # ------------------------------------------------------------ metadata
     def provinces(self) -> list[tuple[str, str, int]]:
-        rows = self.conn.execute(
-            "SELECT province, island, COUNT(*) n FROM dishes "
-            "WHERE province NOT IN ('', 'Nasional') "
-            "GROUP BY province ORDER BY n DESC")
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT province, island, COUNT(*) n FROM dishes "
+                "WHERE province NOT IN ('', 'Nasional') "
+                "GROUP BY province ORDER BY n DESC").fetchall()
         return [(r["province"], r["island"], r["n"]) for r in rows]
 
     def island_of(self, province: str) -> str:
-        row = self.conn.execute(
-            "SELECT island FROM dishes WHERE province = ? LIMIT 1",
-            (province,)).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT island FROM dishes WHERE province = ? LIMIT 1",
+                (province,)).fetchone()
         return row["island"] if row else ""
 
     def search_dishes(self, query: str = "", slot: Optional[str] = None,
@@ -145,6 +158,8 @@ class RacikStore:
                    " quality DESC LIMIT ?")
         params.append(int(limit))
 
+        with self._lock:
+            rows = self.conn.execute(" ".join(sql), params).fetchall()
         return [
             {
                 "dish_id": r["dish_id"], "name": r["name"], "slot": r["slot"],
@@ -155,18 +170,19 @@ class RacikStore:
                 "quality": r["quality_label"],
                 "main_ingredient": r["main_food_name"],
             }
-            for r in self.conn.execute(" ".join(sql), params)
+            for r in rows
         ]
 
     def stats(self) -> dict:
-        row = self.conn.execute(
-            "SELECT COUNT(*) dishes, AVG(quality) mean_quality, "
-            "AVG(cost_per_portion_idr) mean_cost FROM dishes").fetchone()
-        slots = {r["slot"]: r["n"] for r in self.conn.execute(
-            "SELECT slot, COUNT(*) n FROM dishes GROUP BY slot")}
-        foods = self.conn.execute("SELECT COUNT(*) n FROM foods").fetchone()["n"]
-        lines = self.conn.execute(
-            "SELECT COUNT(*) n FROM dish_lines").fetchone()["n"]
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) dishes, AVG(quality) mean_quality, "
+                "AVG(cost_per_portion_idr) mean_cost FROM dishes").fetchone()
+            slots = {r["slot"]: r["n"] for r in self.conn.execute(
+                "SELECT slot, COUNT(*) n FROM dishes GROUP BY slot").fetchall()}
+            foods = self.conn.execute("SELECT COUNT(*) n FROM foods").fetchone()["n"]
+            lines = self.conn.execute(
+                "SELECT COUNT(*) n FROM dish_lines").fetchone()["n"]
         return {
             "dishes": row["dishes"], "foods": foods, "ingredient_lines": lines,
             "mean_quality": round(row["mean_quality"] or 0, 3),
@@ -175,7 +191,8 @@ class RacikStore:
         }
 
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
 
 
 def _row_to_dish(row: sqlite3.Row) -> Dish:
@@ -191,7 +208,7 @@ def _row_to_dish(row: sqlite3.Row) -> Dish:
         island=row["island"], slot=row["slot"], servings=row["servings"],
         method=row["method"], lines=[],
         per_portion={k: (row[k] or 0.0) for k in NUTRIENT_KEYS},
-        cost_per_portion_idr=row["cost_per_portion_idr"],
+        cost_per_portion_idr=row["cost_per_portion_idr"] or 0.0,
         portion_mass_g=row["portion_mass_g"], quality=quality,
         steps=row["steps"] or "", confidence=row["confidence"] or "",
         ingredient_index=row["ingredient_index"] or "",

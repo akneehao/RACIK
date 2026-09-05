@@ -543,6 +543,62 @@ function buildWhyList(view, resolved) {
   return items.length ? items : ['No adjustments were needed for this day.'];
 }
 
+// Ratings this browser has submitted, keyed dish_id -> stars. The backend
+// deliberately exposes no GET for a dish's mean score, so a fresh page load
+// can only show what was rated in this session — enough to confirm a click
+// registered, which is all this widget is for.
+const submittedRatings = {};
+
+/** Render the 1-5 star widget for one dish into `containerId`, and post any
+ * click to /api/rate.
+ *
+ * This is the operator half of the repetition loop. A rating is scoped to
+ * the province and age stage the plan was solved for, because history.py
+ * keys its recency weights the same way — an unscoped rating would quietly
+ * push a dish out of another region's rotation. Without a resolved scope
+ * there is nothing coherent to attach the score to, so the widget stays
+ * hidden rather than posting a rating that lands in the wrong bucket.
+ */
+function renderDishRating(containerId, dish, resolved) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!dish || !resolved) { el.innerHTML = ''; return; }
+
+  const current = submittedRatings[dish.dish_id] || 0;
+  el.innerHTML =
+    [1, 2, 3, 4, 5].map((n) =>
+      `<button type="button" class="star-btn${n <= current ? ' filled' : ''}" data-n="${n}"
+         aria-label="Rate ${n} of 5">★</button>`).join('') +
+    `<span class="rate-status">${current ? `Rated ${current}/5 — affects future rotation` : 'Rate this dish'}</span>`;
+
+  const status = el.querySelector('.rate-status');
+  el.querySelectorAll('.star-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const n = Number(btn.dataset.n);
+      // Paint first: the score is advisory, so a slow network shouldn't make
+      // the widget feel broken. Only a real failure repaints it back.
+      submittedRatings[dish.dish_id] = n;
+      el.querySelectorAll('.star-btn').forEach((b) => b.classList.toggle('filled', Number(b.dataset.n) <= n));
+      status.classList.remove('failed');
+      status.textContent = 'Saving…';
+      try {
+        await api.rate({
+          dish_id: dish.dish_id,
+          rating: n,
+          province: resolved.province || '',
+          stage: resolved.stage || 'sd',
+        });
+        status.textContent = `Rated ${n}/5 — affects future rotation`;
+      } catch (err) {
+        delete submittedRatings[dish.dish_id];
+        el.querySelectorAll('.star-btn').forEach((b) => b.classList.remove('filled'));
+        status.classList.add('failed');
+        status.textContent = "Couldn't save that rating.";
+      }
+    });
+  });
+}
+
 /** Populate and show Screen 4 for a given generated-day view object. */
 export async function showDetail(view) {
   const week = state.weeks.find((w) => w.runId === view.runId);
@@ -570,6 +626,9 @@ export async function showDetail(view) {
   document.getElementById('sideDishName').textContent = side ? glossFor(side.name) : 'Not planned';
   document.getElementById('sideDishNameId').textContent =
     side && glossFor(side.name) !== cleanDishName(side.name) ? cleanDishName(side.name) : '';
+
+  renderDishRating('mainDishRating', main, resolved);
+  renderDishRating('sideDishRating', side, resolved);
 
   showScreen('screen-4');   // show immediately; ingredient/step panels fill in as they load
 

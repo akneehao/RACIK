@@ -224,6 +224,137 @@ def test_get_dish_exposes_gram_provenance(store, optimizer):
     assert all("basis" in line for line in detail["ingredients"])
 
 
+def test_propose_recipe_computes_real_numbers_from_model_authored_lines(store, optimizer):
+    """The model chooses the ingredient lines (this is the one tool where
+    that's allowed — see orchestrator.py's SYSTEM_PROMPT bullet on it), but
+    the resulting nutrition/cost is still computed by the same deterministic
+    pipeline every corpus recipe goes through, never stated by the model."""
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan",
+                          "3 buah cabai hijau"],
+        province="Jawa Tengah")
+    assert "error" not in out
+    assert out["draft"]["cost_per_portion_idr"] > 0
+    assert out["draft"]["per_portion"]["protein_g"] > 0
+    # echoed back verbatim, not re-derived — /api/recipe/save persists
+    # exactly this text, not the computed numbers
+    assert out["ingredient_lines"] == ["1 kg ayam, daging, segar",
+                                       "400 ml santan", "3 buah cabai hijau"]
+
+
+def test_propose_recipe_reports_the_scope_it_would_save_under(store, optimizer):
+    """Regression test for a real bug: the draft card must show (and let a
+    kitchen operator confirm/correct) exactly which province/stage a save
+    would use — silently defaulting to the setup form's current selection
+    is how a recipe drafted for one region/stage in free text ends up
+    saved under a completely different one and is never considered for
+    the menu it was actually meant for."""
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan"],
+        province="Jawa Tengah", stage="smp")
+    assert out["suggested_scope"] == {"province": "Jawa Tengah", "stage": "smp"}
+
+
+def test_propose_recipe_leaves_scope_blank_when_unsaid(store, optimizer):
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](
+        name="Gulai Ayam Hijau",
+        ingredient_lines=["1 kg ayam, daging, segar", "400 ml santan"])
+    assert out["suggested_scope"] == {"province": "", "stage": ""}
+
+
+def test_propose_recipe_reports_an_error_not_a_crash_on_unusable_input(store, optimizer):
+    orch = RacikOrchestrator(store, optimizer, ScriptedSeaLion([]))
+    out = orch.tools["propose_recipe"](name="Gibberish",
+                                       ingredient_lines=["zzz not real zzz"])
+    assert "error" in out
+    assert "draft" not in out
+
+
+def test_propose_recipe_reaches_a_full_agent_loop(store, optimizer):
+    # _call()'s own first parameter is named "name", which collides with
+    # propose_recipe's "name" argument (the dish name) — build the
+    # ToolCall directly instead of going through that helper.
+    tool_call = ToolCall(id="call_propose_recipe", name="propose_recipe",
+                         arguments={"name": "Gulai Ayam Hijau",
+                                    "ingredient_lines": ["1 kg ayam, daging, segar",
+                                                         "400 ml santan"]})
+    client = ScriptedSeaLion([
+        ChatResult(content="", tool_calls=[tool_call]),
+        ChatResult(content="draf resep siap ditinjau"),
+    ])
+    result = RacikOrchestrator(store, optimizer, client).ask("tambah resep baru")
+    payload = result.trace[0].result
+    assert payload["draft"]["name"] == "Gulai Ayam Hijau"
+    assert payload["draft"]["cost_per_portion_idr"] > 0
+
+
+# ---------------------------------------------------------------- narration verification
+
+def test_unverified_numbers_flags_a_figure_not_backed_by_any_tool_result():
+    """The core case this exists for: a number the model typed that never
+    came from a tool at all — this is exactly what the trust story
+    promises never silently happens."""
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {"summary": {
+        "mean_cost_per_portion_idr": 6990}}, 0.1)]
+    flagged = _unverified_numbers(
+        "Biaya per porsi Rp6.990, tapi total belanja Rp999.999.", trace)
+    assert "Rp999.999" in flagged
+    assert "Rp6.990" not in flagged
+
+
+def test_unverified_numbers_tolerates_percentage_narrated_from_a_fraction():
+    """The critical anti-false-positive case: adequacy is stored as a 0-1
+    fraction in every tool payload (e.g. mean_adequacy: 0.968), and every
+    normal, correct answer narrates it as a percentage ("97%"). Without
+    the x100 tolerance this is built with, this single, extremely common
+    pattern would flag nearly every correct answer Racik produces."""
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {
+        "summary": {"mean_adequacy": 0.968}}, 0.1)]
+    assert _unverified_numbers("Pemenuhan AKG rata-rata 97%.", trace) == []
+
+
+def test_unverified_numbers_matches_rupiah_regardless_of_thousands_style():
+    from racik.orchestrator import ToolInvocation, _unverified_numbers
+    trace = [ToolInvocation("plan_menu", {}, {"cost_per_portion_idr": 6990}, 0.1)]
+    assert _unverified_numbers("Biaya per porsi adalah Rp6.990.", trace) == []
+    assert _unverified_numbers("Cost per portion is Rp6,990.", trace) == []
+
+
+def test_unverified_numbers_returns_empty_when_trace_is_empty():
+    """No tool ran — nothing to verify against, and nothing should be
+    flagged as a false accusation of a number with no ground truth to
+    check it against."""
+    from racik.orchestrator import _unverified_numbers
+    assert _unverified_numbers("Biaya sekitar Rp5.000.", []) == []
+
+
+def test_full_agent_loop_surfaces_unverified_numbers(store, optimizer):
+    client = ScriptedSeaLion([
+        _call("plan_menu", stage="sd", days=1, portions=50),
+        ChatResult(content="Biaya per porsi sekitar Rp1.234.567 — sangat terjangkau."),
+    ])
+    result = RacikOrchestrator(store, optimizer, client).ask("buatkan menu")
+    assert result.unverified_numbers  # the solver never produces this figure
+    assert any("1.234.567" in n for n in result.unverified_numbers)
+
+
+def test_fallback_path_never_flags_a_number(store, optimizer):
+    """The rule-based fallback's text is built directly from the same
+    payload it's checked against (see _render_plan_text), so it can never
+    disagree with itself — confirms the check doesn't misfire there."""
+    orch = RacikOrchestrator(store, optimizer, SeaLionClient(api_key=""))
+    result = orch.ask("Menu 2 hari untuk SD, 100 porsi")
+    assert result.mode == "fallback"
+    assert result.unverified_numbers == []
+
+
 # ---------------------------------------------------------------- fallback
 
 def test_fallback_used_when_no_api_key(store, optimizer):
@@ -253,7 +384,23 @@ def test_network_failure_degrades_to_fallback(store, optimizer):
     orch = RacikOrchestrator(store, optimizer, Broken([]))
     result = orch.ask("Menu 2 hari SD")
     assert result.mode == "fallback"
-    assert "SEA-LION" in result.answer and result.plan is not None
+    assert result.plan is not None
+    # The technical failure reason is available (for a tooltip/log) but
+    # deliberately kept out of the answer body — a raw error as the first
+    # thing an operator reads is alarming and explains nothing to them.
+    assert result.fallback_reason and "connection reset" in result.fallback_reason
+    assert "SEA-LION" not in result.answer
+    assert "connection reset" not in result.answer
+
+
+def test_provider_not_configured_at_all_has_no_fallback_reason(store, optimizer):
+    """Distinguishes "nothing is set up" from "a configured provider just
+    failed" — only the latter is an error worth explaining anywhere."""
+    from racik.sealion import SeaLionClient
+    orch = RacikOrchestrator(store, optimizer, SeaLionClient(api_key=""))
+    result = orch.ask("Menu 2 hari SD")
+    assert result.mode == "fallback"
+    assert result.fallback_reason is None
 
 
 # ---------------------------------------------------------------- intent

@@ -145,7 +145,16 @@ c-66 -72 41 -92 539 -100 298 -5 335 -4 358 11 29 19 32 38 9 60 -13 13 -44
 
         <div class="field-group">
           <h3>Allergy / preference notes <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
-          <p class="field-hint">E.g. avoid peanuts, reduce spicy food, add more vegetarian options.</p>
+          <p class="field-hint">Tap a common restriction, or write anything else — Agen Gizi reads this text and turns it into exclusions.</p>
+          <div class="chip-row" id="allergyChips">
+            <button type="button" class="chip" data-term="udang">Shrimp</button>
+            <button type="button" class="chip" data-term="kacang">Peanuts</button>
+            <button type="button" class="chip" data-term="telur">Egg</button>
+            <button type="button" class="chip" data-term="susu">Milk</button>
+            <button type="button" class="chip" data-term="ikan">Fish</button>
+            <button type="button" class="chip" data-term="daging sapi">Beef</button>
+            <button type="button" class="chip" data-term="pedas">Spicy</button>
+          </div>
           <textarea id="notesInput" placeholder="Write any notes here…"></textarea>
         </div>
       </div>
@@ -359,6 +368,7 @@ c13 18 47 63 77 100 l54 67 -32 68 c-18 37 -34 82 -37 100 -8 49 -41 70 -126
               </div>
               <span class="dish-badge main">Main Dish</span>
             </div>
+            <div class="dish-rating" id="mainDishRating"></div>
             <div class="dish-grid">
               <div>
                 <ul class="ingredient-list" id="mainIngredientList"></ul>
@@ -379,6 +389,7 @@ c13 18 47 63 77 100 l54 67 -32 68 c-18 37 -34 82 -37 100 -8 49 -41 70 -126
               </div>
               <span class="dish-badge side">Side Dish</span>
             </div>
+            <div class="dish-rating" id="sideDishRating"></div>
             <div class="dish-grid">
               <div>
                 <ul class="ingredient-list" id="sideIngredientList"></ul>

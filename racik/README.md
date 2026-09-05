@@ -17,7 +17,7 @@ python -m uvicorn racik.api:app --port 8000     # then open http://127.0.0.1:800
 ```
 
 The styled operator frontend (`../index.html`, `../css/`, `../js/`) is served
-at `/`; the plainer Indonesian-language reference UI stays at `/legacy`. No
+at `/`; the agent-first single-file UI stays at `/agent`. No
 LLM provider is required — without one, Agen Gizi, Agen Biaya, and the
 orchestrator all fall back to a deterministic rule-based path.
 
@@ -414,8 +414,8 @@ dozen separate uploads named some variant of "Tempe Mendoan"; constraining on
 | `racik/serialize.py` | Plan → JSON, shared by `/api/plan` and the generate() pipeline |
 | `racik/sealion.py` | SEA-LION client: auth, rate limiting, tool-call parsing |
 | `racik/orchestrator.py` | Tool definitions, bounded agent loop, fallback parser, generate() pipeline |
-| `racik/api.py` | FastAPI endpoints + static hosting for the root frontend and `/legacy` |
-| `ui/index.html` | Plainer Indonesian-language reference UI, mounted at `/legacy` |
+| `racik/api.py` | FastAPI endpoints + static hosting for the root frontend and `/agent` |
+| `ui/index.html` | Agent-first single-file UI, mounted at `/agent` |
 | `../index.html`, `../css/`, `../js/` | The styled operator frontend, served at `/` |
 | `scripts/build_db.py` | ETL |
 | `scripts/package.py` | Builds the ID and EN release archives |
