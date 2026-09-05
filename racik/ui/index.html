@@ -2278,7 +2278,13 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
           lines[key].gross_g += (ing.gross_g || 0) * scale;
           lines[key].cost_idr += (ing.cost_idr || 0) * scale;
           lines[key].used_in.add(full.name);
-          if (ing.tkpi_code && !index[ing.tkpi_code]) index[ing.tkpi_code] = { dish_id, name: full.name, dayIndex, slot };
+          // Index by the same key as the line itself — including the
+          // "name:x" fallback for ingredients with no resolved tkpi_code
+          // (e.g. "lombok", a regional word for chili the matcher didn't
+          // recognize). /api/substitute only needs a dish_id and the
+          // free-text ingredient name, so an unmatched ingredient is still
+          // fully actionable — it just has no code, not no dish.
+          if (!index[key]) index[key] = { dish_id, name: full.name, dayIndex, slot };
         });
       });
 
