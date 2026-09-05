@@ -196,6 +196,16 @@
   #page-crafting .pantry-row input[type="checkbox"]{ width:17px; height:17px; accent-color:var(--leaf); flex-shrink:0 }
   #page-crafting .pantry-row .pname{ flex:1; font-weight:600 }
   #page-crafting .pantry-row .pmeta{ font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; color:var(--ink-soft) }
+  #page-crafting .pantry-row.stale{ opacity:.75; background:var(--chili-pale, rgba(190,66,50,.08)); border-radius:10px; padding:9px 10px; margin:2px 0 }
+  #page-crafting .pantry-row.stale .pname{ text-decoration:line-through; text-decoration-color:var(--chili); text-decoration-thickness:1.5px }
+  #page-crafting .pantry-days-left{ padding:6px 8px; border:1.5px solid var(--line); border-radius:8px; background:var(--paper); font-family:'JetBrains Mono',ui-monospace,monospace; font-size:12px; text-align:center; color:var(--ink) }
+  #page-crafting .review-icon{
+    width:28px; height:28px; border-radius:50%; border:1.5px solid var(--line); background:var(--paper);
+    display:grid; place-items:center; cursor:pointer; color:var(--ink-soft); padding:0; flex-shrink:0;
+  }
+  #page-crafting .review-icon svg{ width:13px; height:13px }
+  #page-crafting .review-icon.accept:hover{ background:var(--leaf); border-color:var(--leaf); color:#fff }
+  #page-crafting .review-icon.reject:hover{ background:var(--chili); border-color:var(--chili); color:#fff }
   #page-crafting .empty-note{ padding:10px 0; color:var(--ink-soft); font-size:13px }
   #page-crafting .custom-toggle{ display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700; color:var(--ink-soft); cursor:pointer; margin-top:16px; background:none; border:none; padding:0; font-family:inherit }
   #page-crafting .switch{ width:36px; height:20px; border-radius:100px; background:var(--line); position:relative; transition:background .15s ease }
@@ -233,6 +243,10 @@
   #page-menu .menu-sub{ text-align:center; font-size:13.5px; color:var(--ink-soft); margin:0 0 18px; position:relative; z-index:2 }
   #page-menu .action-row{ display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; margin-bottom:26px; position:relative; z-index:2 }
   #page-menu .btn-ghost{ font-family:inherit; font-weight:700; font-size:13px; color:var(--ink); background:var(--plate); border:1.5px solid var(--line); border-radius:100px; padding:9px 16px; cursor:pointer; display:inline-flex; align-items:center; gap:7px }
+  #page-menu .btn-primary{ font-family:'Baloo 2',sans-serif; font-weight:700; font-size:16px; color:var(--plate); background:var(--leaf); border:none; border-radius:100px; padding:13px 26px; cursor:pointer; box-shadow:0 6px 0 var(--marigold-deep); transition:transform .1s ease, box-shadow .1s ease }
+  #page-menu .btn-primary:hover{ transform:translateY(-1px); box-shadow:0 8px 0 var(--marigold-deep) }
+  #page-menu .btn-primary:active{ transform:translateY(2px); box-shadow:0 3px 0 var(--marigold-deep) }
+  #page-menu .ask-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:12px }
   #page-menu .btn-ghost:hover{ border-color:var(--leaf) }
   #page-menu .btn-ghost svg{ width:15px; height:15px }
   #page-menu .btn-ghost.newbuild{ background:var(--marigold-pale); border-color:var(--marigold); color:var(--marigold-deep) }
@@ -329,7 +343,10 @@
   #page-menu .qty-field input{ width:64px; padding:6px 8px; font-family:'JetBrains Mono',monospace; font-size:12.5px; text-align:right; border:1.5px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink) }
   #page-menu .qty-field input.short{ border-color:var(--chili); background:var(--chili-pale); color:var(--chili) }
   #page-menu .qty-field .unit{ font-size:11px; color:var(--ink-soft) }
+  #page-menu .stock-row.unavailable{ background:var(--chili-pale) }
+  #page-menu .stock-row.unavailable .n{ text-decoration:line-through; text-decoration-color:var(--chili); opacity:.75 }
   #page-menu .short-badge{ font-size:9.5px; font-weight:800; text-transform:uppercase; color:#fff; background:var(--chili); padding:2px 7px; border-radius:100px; flex-shrink:0 }
+  #page-menu .stale-badge{ background:var(--marigold-deep) }
   #page-menu .stock-remove{ width:24px; height:24px; border-radius:50%; border:none; background:none; color:var(--ink-soft); cursor:pointer; flex-shrink:0; display:grid; place-items:center }
   #page-menu .stock-remove:hover{ color:var(--chili) }
   #page-menu .stock-remove svg{ width:12px; height:12px }
@@ -1140,8 +1157,8 @@ const STRINGS = {
     "aiv.namePh": "Nama bahan",
     "aiv.qtyPh": "gram",
     "btn.addToStock": "Tambah ke stok",
-    "aiv.note": "Dicocokkan berdasar nama dengan bahan yang sudah ada di susunan ini — Racik belum bisa mencatat stok untuk bahan yang tidak dipakai resep manapun saat ini.",
-    "aiv.noMatch": "Tidak ada bahan yang cocok dengan \"{name}\" pada susunan ini.",
+    "aiv.note": "Racik mengenali sebagian besar bahan segar dan pokok — tidak untuk bumbu tunggal seperti garam atau minyak.",
+    "aiv.noMatch": "Racik tidak mengenali \"{name}\" sebagai bahan makanan — coba nama lain atau ejaan yang lebih umum.",
     "aiv.added": "Menambahkan {qty} g ke {name}.",
     "btn.findSolution": "Cari solusi",
     "solution.title": "Solusi dari Racik",
@@ -1175,6 +1192,19 @@ const STRINGS = {
     "pantry.usableWithin": "layak {n} hari ke depan",
     "pantry.noExpiry": "tidak ada batas waktu",
     "pantry.none": "Tidak ada stok sisa tercatat untuk cakupan ini.",
+    "pantry.staleFor": "tercatat {n} hari lalu — cek dulu",
+    "pantry.daysLeftPh": "hari",
+    "pantry.stillGood": "Masih bagus",
+    "pantry.noLongerGood": "Sudah tidak bagus",
+    "stock.markUnavailable": "Toko tidak ada",
+    "stock.unavailableMarked": "Ditandai tak tersedia",
+    "stock.toBuy": "beli",
+    "stock.checkFreshness": "cek dulu",
+    "solution.swapDish": "Tukar {name}",
+    "solution.regenPlan": "Racik ulang seluruh rencana tanpa bahan ini",
+    "solution.swapping": "Menukar…",
+    "solution.swapped": "Ditukar — {name} diganti.",
+    "solution.swapItemFailed": "Gagal menukar — coba lagi.",
   },
   en: {
     "page.title": "Racik — MBG Menu Planner",
@@ -1320,8 +1350,8 @@ const STRINGS = {
     "aiv.namePh": "Ingredient name",
     "aiv.qtyPh": "grams",
     "btn.addToStock": "Add to stock",
-    "aiv.note": "Matches by name against ingredients already in this build — Racik can't yet record stock for something no current recipe uses.",
-    "aiv.noMatch": "No ingredient matching \"{name}\" in this build.",
+    "aiv.note": "Racik recognizes most fresh and staple ingredients — not single seasonings like salt or oil.",
+    "aiv.noMatch": "Racik couldn't identify \"{name}\" as a food ingredient — try a different name or more common spelling.",
     "aiv.added": "Added {qty} g to {name}.",
     "btn.findSolution": "Let's find a solution",
     "solution.title": "Racik's solution",
@@ -1355,6 +1385,19 @@ const STRINGS = {
     "pantry.usableWithin": "usable for the next {n} days",
     "pantry.noExpiry": "no expiry set",
     "pantry.none": "No leftover stock recorded for this scope.",
+    "pantry.staleFor": "recorded {n} days ago — check first",
+    "pantry.daysLeftPh": "days",
+    "pantry.stillGood": "Still good",
+    "pantry.noLongerGood": "No longer good",
+    "stock.markUnavailable": "Shop doesn't have it",
+    "stock.unavailableMarked": "Marked unavailable",
+    "stock.toBuy": "buy",
+    "stock.checkFreshness": "check freshness",
+    "solution.swapDish": "Swap {name}",
+    "solution.regenPlan": "Regenerate the whole plan without this",
+    "solution.swapping": "Swapping…",
+    "solution.swapped": "Swapped — {name} replaced.",
+    "solution.swapItemFailed": "Couldn't swap — try again.",
   },
 };
 
@@ -1476,6 +1519,13 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
   const DAY_REVIEW = {};   // dayIndex -> {status, reason, reasonText, suggestionOutcome}
   let currentRecipeDay = 0;
   let STOCK_LINES = [], STOCK_SHORT = [];
+  // Ingredients marked "the shop doesn't carry this" while actually
+  // shopping — distinct from low/zero on-hand inventory. Low stock just
+  // means buy more; this means buying it at all isn't an option this week,
+  // which is the actual trigger for "find a solution". Scoped to the
+  // current plan — reset whenever a new one is solved (see runSolve()).
+  let SHOP_UNAVAILABLE = new Set(loadJSON("racik.shopUnavailable") || []);
+  let INGREDIENT_DISH_INDEX = null; // tkpi_code -> {dish_id, name}, built from PLAN's actual dishes (see buildIngredientDishIndex)
   let applyStoredOverridesOnce = true;
 
   async function loadMeta(){ META = await (await fetch(API + "/api/meta")).json(); }
@@ -1577,17 +1627,70 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
   // Fetches this scope's recorded leftovers (racik/data/history.db via
   // /api/pantry) so the kitchen can confirm what's still good before a solve
   // — the solver only gets a pantry bonus for items actually confirmed here.
+  // No shelf-life data exists per ingredient (TKPI has no spoilage field),
+  // so this isn't a decay curve — it's a plain staleness clock on the
+  // record itself: an item is flagged once it's past the days the kitchen
+  // said it was good for (usable_within_days), or — if no expiry was ever
+  // given — past a conservative default review window. Either way it's a
+  // prompt to double-check before the next solve leans on it, not a claim
+  // about the food's actual condition.
+  const DEFAULT_PANTRY_REVIEW_DAYS = 5;
+  function pantryStaleDays(it){
+    const daysSince = (Date.now()/1000 - it.updated_at) / 86400;
+    const window = it.usable_within_days != null ? it.usable_within_days : DEFAULT_PANTRY_REVIEW_DAYS;
+    return daysSince > window ? daysSince : null; // null = not stale
+  }
+
   async function loadPantryStep(){
     try {
       const res = await fetch(`${API}/api/pantry?province=${encodeURIComponent(CRAFT.province)}&stage=${CRAFT.stage}`);
       const items = (await res.json()).items;
       el("pantrySection").hidden = items.length === 0;
-      el("pantryList").innerHTML = items.length ? items.map(it => `
-        <label class="pantry-row">
-          <input type="checkbox" checked data-tkpi-code="${it.tkpi_code}" ${it.usable_within_days != null ? `data-usable-within-days="${it.usable_within_days}"` : ""}>
+      el("pantryList").innerHTML = items.length ? items.map(it => {
+        const staleDays = pantryStaleDays(it);
+        if (staleDays == null) {
+          return `
+          <label class="pantry-row">
+            <input type="checkbox" checked data-tkpi-code="${it.tkpi_code}" ${it.usable_within_days != null ? `data-usable-within-days="${it.usable_within_days}"` : ""}>
+            <span class="pname">${it.ingredient_name}</span>
+            <span class="pmeta">${fmtKg(it.remaining_g)} · ${it.usable_within_days != null ? t("pantry.usableWithin",{n:it.usable_within_days}) : t("pantry.noExpiry")}</span>
+          </label>`;
+        }
+        // Stale: unchecked by default (don't assume it's still good),
+        // greyed, and asks for an explicit approve/reject/update-days call
+        // instead of a plain checkbox.
+        return `
+        <div class="pantry-row stale" data-tkpi-code="${it.tkpi_code}" data-name="${it.ingredient_name}" data-remaining="${it.remaining_g}">
+          <input type="checkbox" data-tkpi-code="${it.tkpi_code}">
           <span class="pname">${it.ingredient_name}</span>
-          <span class="pmeta">${fmtKg(it.remaining_g)} · ${it.usable_within_days != null ? t("pantry.usableWithin",{n:it.usable_within_days}) : t("pantry.noExpiry")}</span>
-        </label>`).join("") : `<p class="empty-note">${t("pantry.none")}</p>`;
+          <span class="pmeta">${fmtKg(it.remaining_g)} · ${t("pantry.staleFor",{n:Math.floor(staleDays)})}</span>
+          <input type="number" class="pantry-days-left" min="0" placeholder="${t("pantry.daysLeftPh")}" style="width:56px">
+          <button type="button" class="review-icon accept pantry-confirm" title="${t("pantry.stillGood")}" aria-label="${t("pantry.stillGood")}">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="review-icon reject pantry-clear" title="${t("pantry.noLongerGood")}" aria-label="${t("pantry.noLongerGood")}">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg>
+          </button>
+        </div>`;
+      }).join("") : `<p class="empty-note">${t("pantry.none")}</p>`;
+
+      el("pantryList").querySelectorAll(".pantry-confirm").forEach(btn => btn.onclick = async () => {
+        const row = btn.closest(".pantry-row");
+        const tkpi_code = row.dataset.tkpiCode, remaining_g = +row.dataset.remaining;
+        const daysInput = row.querySelector(".pantry-days-left").value;
+        const usable_within_days = daysInput ? +daysInput : null;
+        await fetch(API + "/api/pantry/report", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ province: CRAFT.province, stage: CRAFT.stage, tkpi_code,
+            ingredient_name: row.dataset.name, remaining_g, usable_within_days }),
+        });
+        loadPantryStep(); // re-fetch — updated_at just reset, so it's no longer stale
+      });
+      el("pantryList").querySelectorAll(".pantry-clear").forEach(btn => btn.onclick = async () => {
+        const row = btn.closest(".pantry-row");
+        await fetch(API + `/api/pantry/clear?province=${encodeURIComponent(CRAFT.province)}&stage=${CRAFT.stage}&tkpi_code=${encodeURIComponent(row.dataset.tkpiCode)}`, { method:"POST" });
+        loadPantryStep();
+      });
     } catch (err) { el("pantrySection").hidden = true; }
   }
 
@@ -1671,9 +1774,9 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
       });
       const data = await res.json();
       el("askAnswer").textContent = data.answer;
-      if (data.fallback_reason && data.fallback_reason.length) {
+      if (data.fallback_reason) {
         el("askFallbackNote").hidden = false;
-        el("askFallbackNote").textContent = t("ask.fallbackPrefix") + data.fallback_reason.join(" ");
+        el("askFallbackNote").textContent = t("ask.fallbackPrefix") + data.fallback_reason;
       } else {
         el("askFallbackNote").hidden = true;
       }
@@ -1740,6 +1843,9 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
       saveJSON("racik.plan", PLAN);
       localStorage.removeItem("racik.procurement");
       Object.keys(DAY_REVIEW).forEach(k => delete DAY_REVIEW[k]);
+      SHOP_UNAVAILABLE = new Set();
+      localStorage.removeItem("racik.shopUnavailable");
+      INGREDIENT_DISH_INDEX = null;
       renderMenuFromPlan(PLAN);
       showPage("page-menu");
       fetchProcurement();
@@ -1926,7 +2032,7 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
     };
     if (DISH_CACHE[key]) { render(DISH_CACHE[key]); return; }
     const qs = `?province=${encodeURIComponent(CRAFT.province)}&stage=${CRAFT.stage}`;
-    fetch(`${API}/api/dish/${dishId}${qs}`).then(r => r.json()).then(full => {
+    fetch(`${API}/api/dish/${dishId}${qs}`).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status))).then(full => {
       DISH_CACHE[key] = full;
       render(full);
     }).catch(() => { detail.innerHTML = `<p style="color:var(--chili);font-size:12.5px">${t("dish.detailError")}</p>`; });
@@ -1987,12 +2093,22 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
     const showOtherInput = state.status === "rejected" && state.reason === "other";
     el("otherReasonInput").hidden = !showOtherInput;
     if(showOtherInput) el("otherReasonInput").value = state.reasonText || "";
-    el("reviewStatus").textContent =
+    // Every logged outcome gets the same clear, visible confirmation — not
+    // just the two reasons (cost/region) that also get a swap suggestion
+    // below. Recording nutrition/kids-disliked/other is a real save to
+    // history.db (see logDayReview) even though nothing else appears.
+    const confirmedText =
       state.status === "accepted" ? t("review.accepted") :
-      state.status === "rejected" && state.reason === "other" ? (state.reasonText ? t("review.recordedText",{text:state.reasonText}) : t("review.sayWhy")) :
-      state.status === "rejected" && state.reason ? t("review.recordedReason",{reason:t(REASON_LABELS[state.reason])}) :
+      state.status === "rejected" && state.reason === "other" && state.reasonText ? t("review.recordedText",{text:state.reasonText}) :
+      state.status === "rejected" && state.reason && state.reason !== "other" ? t("review.recordedReason",{reason:t(REASON_LABELS[state.reason])}) :
+      null;
+    const promptText =
+      state.status === "rejected" && state.reason === "other" ? t("review.sayWhy") :
       state.status === "rejected" ? t("review.pickReason") :
       "";
+    el("reviewStatus").innerHTML = confirmedText ? `✓ ${confirmedText}` : promptText;
+    el("reviewStatus").style.color = confirmedText ? "var(--leaf-deep)" : "var(--ink-soft)";
+    el("reviewStatus").style.fontWeight = confirmedText ? "700" : "400";
     const eligible = state.status === "rejected" && (state.reason === "cost" || state.reason === "region")
       && !state.suggestionOutcome;
     el("mascotSuggest").hidden = !eligible;
@@ -2121,13 +2237,58 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
   // this plan needs" (a fresh /api/procurement solve) and "what's on
   // hand" happens client-side.
   // ================================================================
+  // Builds the shopping list — and the ingredient -> dish index "find a
+  // solution" needs — entirely from PLAN's own 25 dishes, not a fresh
+  // /api/procurement re-solve. CP-SAT under a time limit isn't guaranteed
+  // to reproduce the exact same dish per slot on a repeat solve, so a
+  // shopping list built that way could total ingredients for dishes that
+  // don't match what's actually on screen, and "find a solution" could
+  // point at a dish the kitchen isn't looking at. Fetching each displayed
+  // dish's real ingredient lines and aggregating them here — mirroring
+  // procurement.py's own aggregate() — keeps Stock and On The Menu always
+  // in agreement, by construction.
   async function fetchProcurement(){
     try {
-      const res = await fetch(API + "/api/procurement", {
-        method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(CRAFT),
+      const occurrences = []; // {dish_id, dayIndex, slot} per (day, slot) — repeats count, same as procurement.py
+      PLAN.days.forEach((day, dayIndex) => META.slots.forEach(s => {
+        if (day.slots[s.key]) occurrences.push({ dish_id: day.slots[s.key].dish_id, dayIndex, slot: s.key });
+      }));
+      const uniqueIds = [...new Set(occurrences.map(o => o.dish_id))];
+      const qs = `?province=${encodeURIComponent(CRAFT.province)}&stage=${CRAFT.stage}`;
+      const detailById = {};
+      await Promise.all(uniqueIds.map(async id => {
+        const key = `${id}:${CRAFT.province}:${CRAFT.stage}`;
+        if (DISH_CACHE[key]) { detailById[id] = DISH_CACHE[key]; return; }
+        // Component dishes (staple/buah, id >= 900000) are synthesized at
+        // solve time and were never written to the dishes table — this
+        // legitimately 404s for them, so they just contribute no lines.
+        const full = await fetch(`${API}/api/dish/${id}${qs}`).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (full) { DISH_CACHE[key] = full; detailById[id] = full; }
+      }));
+
+      const lines = {};  // key -> {key, name, gross_g, cost_idr, matched, used_in:Set}
+      const index = {};  // tkpi_code -> {dish_id, name, dayIndex, slot} — one concrete occurrence to act on
+      occurrences.forEach(({dish_id, dayIndex, slot}) => {
+        const full = detailById[dish_id];
+        if (!full) return;
+        const scale = CRAFT.portions / Math.max(full.servings || 1, 1);
+        full.ingredients.forEach(ing => {
+          const key = ing.tkpi_code || `name:${ing.name}`;
+          if (!lines[key]) lines[key] = { key, name: ing.tkpi_name || ing.name, gross_g: 0, cost_idr: 0, matched: !!ing.tkpi_code, used_in: new Set() };
+          lines[key].gross_g += (ing.gross_g || 0) * scale;
+          lines[key].cost_idr += (ing.cost_idr || 0) * scale;
+          lines[key].used_in.add(full.name);
+          if (ing.tkpi_code && !index[ing.tkpi_code]) index[ing.tkpi_code] = { dish_id, name: full.name, dayIndex, slot };
+        });
       });
-      if (!res.ok) return;
-      PROCUREMENT = await res.json();
+
+      PROCUREMENT = {
+        portions: CRAFT.portions, days: PLAN.days.length,
+        lines: Object.values(lines)
+          .map(l => ({ ...l, gross_kg: l.gross_g / 1000, used_in: [...l.used_in].sort() }))
+          .sort((a,b) => b.cost_idr - a.cost_idr),
+      };
+      INGREDIENT_DISH_INDEX = index;
       saveJSON("racik.procurement", PROCUREMENT);
       if (!el("panel-stock").hidden) renderStock();
     } catch (err) { /* Stock tab shows a loading note and simply retries next time it's opened */ }
@@ -2152,12 +2313,15 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
       ...line,
       onHandG: pantryByCode[line.key] ? pantryByCode[line.key].remaining_g : 0,
       trackable: line.matched, // unmatched lines have no real tkpi_code — see procurement.py
+      staleDays: pantryByCode[line.key] ? pantryStaleDays(pantryByCode[line.key]) : null,
     }));
     const isShort = l => l.onHandG < l.gross_g;
 
+    // Ingredients / Current Stock: inventory tracking, on-hand is editable,
+    // "short" means "you have less recorded than this plan needs" — a
+    // restocking signal, independent of whether the shop actually carries it.
     const row = (l, mode) => {
-      const primary = mode === "toshop" ? Math.max(0, l.gross_g - l.onHandG)
-                     : mode === "current" ? l.onHandG : l.gross_g;
+      const primary = mode === "current" ? l.onHandG : l.gross_g;
       const short = isShort(l);
       return `
       <div class="stock-row" data-key="${l.key}">
@@ -2165,19 +2329,41 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
           <span class="n">${l.name}</span>
           <span class="used">${l.used_in.join(", ")}</span>
         </div>
-        ${mode !== "current" ? `<span class="need">${fmtKg(primary)}</span>` : ""}
+        <span class="need">${fmtKg(primary)}</span>
         <div class="qty-field">
           <span class="unit">${mode === "current" ? t("stock.have") : t("stock.onHand")}</span>
           <input type="number" class="onhand-input" min="0" step="50" value="${Math.round(l.onHandG)}" data-key="${l.key}" ${l.trackable ? "" : `disabled title="${t("stock.notMatchedTitle")}"`}>
           <span class="unit">g</span>
         </div>
         ${short ? `<span class="short-badge">${t("stock.short")}</span>` : ""}
+        ${mode === "current" && l.staleDays != null ? `<span class="short-badge stale-badge" title="${t("pantry.staleFor",{n:Math.floor(l.staleDays)})}">${t("stock.checkFreshness")}</span>` : ""}
         ${mode === "current" ? `<button type="button" class="stock-remove" data-key="${l.key}" aria-label="${t("stock.removeAria")}" title="${t("stock.removeAria")}"><svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>` : ""}
       </div>`;
     };
 
+    // To Shop: a plain shopping list, quantity to buy (needed minus what's
+    // already on hand) — no on-hand editing here, that belongs to
+    // Ingredients/Current Stock. The only interaction is marking an item
+    // "the shop doesn't have it", which is what actually drives "find a
+    // solution" — being low on stock isn't a problem if you can just buy more.
+    const toShopRow = l => {
+      const toBuyG = Math.max(0, l.gross_g - l.onHandG);
+      const marked = SHOP_UNAVAILABLE.has(l.key);
+      return `
+      <div class="stock-row ${marked ? "unavailable" : ""}" data-key="${l.key}">
+        <div class="name">
+          <span class="n">${l.name}</span>
+          <span class="used">${l.used_in.join(", ")}</span>
+        </div>
+        <span class="need">${fmtKg(toBuyG)}</span>
+        <button type="button" class="review-icon reject shop-toggle ${marked ? "active" : ""}" data-key="${l.key}" aria-label="${marked ? t("stock.unavailableMarked") : t("stock.markUnavailable")}" title="${marked ? t("stock.unavailableMarked") : t("stock.markUnavailable")}">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg>
+        </button>
+      </div>`;
+    };
+
     const toShop = lines.filter(l => l.gross_g - l.onHandG > 0);
-    el("toShopList").innerHTML = toShop.length ? toShop.map(l => row(l,"toshop")).join("")
+    el("toShopList").innerHTML = toShop.length ? toShop.map(toShopRow).join("")
       : `<p class="empty-note">${t("stock.nothingToShop")}</p>`;
     el("ingredientsList").innerHTML = lines.map(l => row(l,"ingredients")).join("");
     const stocked = lines.filter(l => l.onHandG > 0);
@@ -2201,12 +2387,18 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
       await fetch(API + `/api/pantry/clear?province=${encodeURIComponent(CRAFT.province)}&stage=${CRAFT.stage}&tkpi_code=${encodeURIComponent(btn.dataset.key)}`, { method:"POST" });
       renderStock();
     });
+    document.querySelectorAll("#page-menu .shop-toggle").forEach(btn => btn.onclick = () => {
+      const key = btn.dataset.key;
+      if (SHOP_UNAVAILABLE.has(key)) SHOP_UNAVAILABLE.delete(key); else SHOP_UNAVAILABLE.add(key);
+      saveJSON("racik.shopUnavailable", [...SHOP_UNAVAILABLE]);
+      renderStock();
+    });
 
-    const short = lines.filter(isShort);
-    el("shortCount").hidden = short.length === 0;
-    el("shortCount").textContent = short.length;
-    el("solutionBtn").disabled = short.length === 0;
-    STOCK_LINES = lines; STOCK_SHORT = short;
+    STOCK_LINES = lines;
+    STOCK_SHORT = toShop.filter(l => SHOP_UNAVAILABLE.has(l.key));
+    el("shortCount").hidden = STOCK_SHORT.length === 0;
+    el("shortCount").textContent = STOCK_SHORT.length;
+    el("solutionBtn").disabled = STOCK_SHORT.length === 0;
   }
 
   document.querySelectorAll("#page-menu .subtabnav button").forEach(btn => btn.onclick = () => {
@@ -2220,21 +2412,47 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
     const qty = +el("aivQty").value || 0;
     el("aivStatus").textContent = "";
     if(!name || qty <= 0) return;
-    const match = STOCK_LINES.find(l => l.trackable && l.name.toLowerCase().includes(name.toLowerCase()));
-    if (!match) {
-      el("aivStatus").style.color = "var(--chili)";
-      el("aivStatus").textContent = t("aiv.noMatch", {name});
-      return;
+    el("aivAdd").disabled = true;
+    try {
+      // This build's own ingredients first — no network round trip needed.
+      const inPlan = STOCK_LINES.find(l => l.trackable && l.name.toLowerCase().includes(name.toLowerCase()));
+      if (inPlan) {
+        await fetch(API + "/api/pantry/report", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ province: CRAFT.province, stage: CRAFT.stage, tkpi_code: inPlan.key,
+            ingredient_name: inPlan.name, remaining_g: inPlan.onHandG + qty }),
+        });
+        el("aivStatus").style.color = "var(--leaf-deep)";
+        el("aivStatus").textContent = t("aiv.added", {qty, name: inPlan.name});
+      } else {
+        // Not in this build — resolve it through the same TKPI matcher every
+        // corpus recipe goes through (recipes.py/compute_dish), same as the
+        // Recipe Workshop endpoint. Only fails for something that can't
+        // classify into a tray slot (staple/hewani/nabati/sayur/buah) — a
+        // pure seasoning or condiment, not most real ingredients.
+        const res = await fetch(API + "/api/recipe/compute", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ name: "stock entry", ingredient_lines: [`${qty} g ${name}`] }),
+        });
+        const resolved = res.ok ? (await res.json()).ingredients[0] : null;
+        if (!resolved || !resolved.tkpi_code) {
+          el("aivStatus").style.color = "var(--chili)";
+          el("aivStatus").textContent = t("aiv.noMatch", {name});
+          return;
+        }
+        await fetch(API + "/api/pantry/report", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ province: CRAFT.province, stage: CRAFT.stage, tkpi_code: resolved.tkpi_code,
+            ingredient_name: resolved.tkpi_name || name, remaining_g: qty }),
+        });
+        el("aivStatus").style.color = "var(--leaf-deep)";
+        el("aivStatus").textContent = t("aiv.added", {qty, name: resolved.tkpi_name || name});
+      }
+      el("aivName").value = ""; el("aivQty").value = "";
+      renderStock();
+    } finally {
+      el("aivAdd").disabled = false;
     }
-    await fetch(API + "/api/pantry/report", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ province: CRAFT.province, stage: CRAFT.stage, tkpi_code: match.key,
-        ingredient_name: match.name, remaining_g: match.onHandG + qty }),
-    });
-    el("aivStatus").style.color = "var(--leaf-deep)";
-    el("aivStatus").textContent = t("aiv.added", {qty, name: match.name});
-    el("aivName").value = ""; el("aivQty").value = "";
-    renderStock();
   };
 
   el("solutionBtn").onclick = async () => {
@@ -2244,36 +2462,89 @@ applyI18n(); // synchronous, before the /api/meta round trip — no flash of the
     el("solutionResult").hidden = true;
     el("solutionPanel").hidden = false;
     const results = await Promise.all(STOCK_SHORT.map(async line => {
-      const usedInName = line.used_in[0];
-      let dishId = null;
-      outer: for (const day of PLAN.days) {
-        for (const s of META.slots) {
-          if (day.slots[s.key] && day.slots[s.key].name === usedInName) { dishId = day.slots[s.key].dish_id; break outer; }
-        }
-      }
-      if (dishId == null) return { line, error: t("solution.notFoundInPlan") };
+      const hit = (INGREDIENT_DISH_INDEX || {})[line.key];
+      if (!hit) return { line, error: t("solution.notFoundInPlan") };
       try {
         const res = await fetch(API + "/api/substitute", {
           method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({ dish_id: dishId, ingredient: line.name, lang: LANG, province: CRAFT.province, stage: CRAFT.stage }),
+          body: JSON.stringify({ dish_id: hit.dish_id, ingredient: line.name, lang: LANG, province: CRAFT.province, stage: CRAFT.stage }),
         });
-        return { line, result: await res.json() };
-      } catch (err) { return { line, error: t("solution.notFoundInPlan") }; }
+        return { line, hit, result: await res.json() };
+      } catch (err) { return { line, hit, error: t("solution.notFoundInPlan") }; }
     }));
-    el("solutionContent").innerHTML = results.map(({line, result, error}) => {
+    // A found dish with no usable substitute is treated the same as "not
+    // found" for the purposes of offering a next step — either way there's
+    // nothing to try in place, only something to change: swap the dish
+    // itself, or as a last resort regenerate the whole plan avoiding this
+    // ingredient entirely.
+    el("solutionContent").innerHTML = results.map(({line, hit, result, error}) => {
       const shortBy = t("solution.shortBy", {gap: fmtKg(line.gross_g - line.onHandG)});
-      if (error) return `<div class="item"><span class="iname">${line.name}</span> — ${shortBy}. ${t("solution.noSuggestion",{error})}</div>`;
+      if (error || !result.substitute) {
+        const reason = error ? t("solution.noSuggestion",{error}) : result.reason;
+        const swapBtn = hit ? `<button type="button" class="btn-ghost item-swap" data-key="${line.key}" data-dish-id="${hit.dish_id}" data-day-index="${hit.dayIndex}" data-slot="${hit.slot}">${t("solution.swapDish",{name:hit.name})}</button>` : "";
+        return `<div class="item">
+          <span class="iname">${line.name}</span> — ${shortBy}. ${reason}
+          <div class="item-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            ${swapBtn}
+            <button type="button" class="btn-ghost item-regen" data-key="${line.key}" data-name="${line.name}">${t("solution.regenPlan")}</button>
+          </div>
+          <span class="item-status" style="display:block;font-size:11.5px;margin-top:6px;color:var(--ink-soft)"></span>
+        </div>`;
+      }
       const src = result.source === "fallback" ? t("solution.fallbackNote") : t("solution.modelNote");
-      return `<div class="item"><span class="iname">${line.name}</span> — ${shortBy}. ${result.reason}${result.substitute ? " " + t("solution.tryThis",{name:result.substitute.name}) : ""}${src}</div>`;
+      return `<div class="item"><span class="iname">${line.name}</span> — ${shortBy}. ${result.reason} ${t("solution.tryThis",{name:result.substitute.name})}${src}</div>`;
     }).join("");
+    document.querySelectorAll("#solutionContent .item-swap").forEach(btn => btn.onclick = async () => {
+      const status = btn.closest(".item").querySelector(".item-status");
+      const dayIndex = +btn.dataset.dayIndex, slot = btn.dataset.slot;
+      status.textContent = t("solution.swapping");
+      btn.disabled = true;
+      const day = PLAN.days[dayIndex];
+      const day_slots = {};
+      META.slots.forEach(s => { day_slots[s.key] = day.slots[s.key] ? day.slots[s.key].dish_id : null; });
+      try {
+        const res = await fetch(API + "/api/swap", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ ...CRAFT, day_index: dayIndex, slot, day_slots }),
+        });
+        if (!res.ok) throw new Error();
+        const swapped = await res.json();
+        Object.assign(day, {
+          slots: swapped.slots, cost_per_portion_idr: swapped.cost_per_portion_idr,
+          cost_total_idr: swapped.cost_total_idr, adequacy: swapped.adequacy,
+          nutrients: swapped.nutrients, compliance: swapped.compliance,
+        });
+        saveJSON("racik.plan", PLAN);
+        renderTray(PLAN);
+        status.textContent = t("solution.swapped", {name: swapped.slots[slot] ? swapped.slots[slot].name : ""});
+        SHOP_UNAVAILABLE.delete(btn.dataset.key);
+        saveJSON("racik.shopUnavailable", [...SHOP_UNAVAILABLE]);
+        fetchProcurement(); // the shopping list needs recomputing against the new dish
+      } catch (err) {
+        status.textContent = t("solution.swapItemFailed");
+        btn.disabled = false;
+      }
+    });
+    document.querySelectorAll("#solutionContent .item-regen").forEach(btn => btn.onclick = async () => {
+      if (!confirm(`${t("solution.regenPlan")} (${btn.dataset.name})?`)) return;
+      el("solutionPanel").hidden = true;
+      // addChip, not a direct CRAFT edit — runSolve() calls
+      // readCraftFromForm() first, which rebuilds exclude_terms straight
+      // from the DOM's chips, so a chip is the only change that survives.
+      addChip(btn.dataset.name);
+      showPage("page-crafting");
+      el("step1").hidden = true; el("step2").hidden = false;
+      await runSolve();
+    });
     el("solutionBtn").disabled = false;
   };
-  el("solutionApprove").onclick = async () => {
-    await Promise.all(STOCK_SHORT.map(line => fetch(API + "/api/pantry/report", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ province: CRAFT.province, stage: CRAFT.stage, tkpi_code: line.key,
-        ingredient_name: line.name, remaining_g: line.gross_g }),
-    })));
+  el("solutionApprove").onclick = () => {
+    // Approving means "proceed with the suggested substitute" — it clears
+    // the unavailable mark so the list reflects it's handled, but doesn't
+    // touch pantry/on-hand records: a substitution decision isn't a claim
+    // that the original ingredient is now in stock.
+    STOCK_SHORT.forEach(line => SHOP_UNAVAILABLE.delete(line.key));
+    saveJSON("racik.shopUnavailable", [...SHOP_UNAVAILABLE]);
     el("solutionResult").hidden = false;
     el("solutionResult").textContent = t("solution.recorded");
     setTimeout(() => { el("solutionPanel").hidden = true; renderStock(); }, 1200);
