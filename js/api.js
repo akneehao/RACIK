@@ -38,6 +38,12 @@ export const api = {
    * same-day replacement excluding the rejected dishes. */
   review: (body) => request('POST', '/api/review', body),
 
+  /** Re-solve one day that came back short of AKG, with the nutrient floors
+   * put above the budget ceiling. Returns the same day payload shape as
+   * review()'s replacement_day, plus an `improvement` block saying whether it
+   * reached the standard and what it now costs per portion. */
+  improveDay: (body) => request('POST', '/api/improve-day', body),
+
   /** Recently served dishes (menu history) and rejection reasons. */
   history: (limit = 30) => request('GET', `/api/history?limit=${limit}`),
 

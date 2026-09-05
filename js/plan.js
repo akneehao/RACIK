@@ -170,6 +170,11 @@ function updateTraySubline(dayCount) {
     `${loc} · ${state.people} people · ${dayCount} day${dayCount === 1 ? '' : 's'}`;
 }
 
+// Days already put through a nutrition-priority re-solve. Asking again with
+// the same inputs returns the same tray, so the button stops offering it
+// rather than looping the operator through an identical answer.
+const attemptedRepair = new Set();
+
 function updateWeekMetrics(days) {
   const { people } = state;
   if (!days.length) return;
@@ -214,6 +219,100 @@ function updateWeekMetrics(days) {
     badge.className = 'badge warn';
   }
   sub.textContent = `${daysMet} of ${days.length} days met`;
+
+  // The offer only exists when there is something to fix: hidden once every
+  // day meets the standard, and disabled once every short day has already
+  // been through a repair, so it never reads as a permanent "try again".
+  const fixBtn = document.getElementById('fixNutritionBtn');
+  if (fixBtn) {
+    const shortDays = days.filter((d) => d.adequacy < MEETS_AKG_THRESHOLD);
+    const untried = shortDays.filter((d) => !attemptedRepair.has(d.key));
+    fixBtn.hidden = shortDays.length === 0;
+    fixBtn.disabled = untried.length === 0;
+    fixBtn.textContent = untried.length === 0
+      ? 'Already rebuilt — raise the budget to go further'
+      : untried.length === 1
+        ? 'Rebuild that day to meet the standard'
+        : `Rebuild ${untried.length} short days to meet the standard`;
+    if (shortDays.length === 0) document.getElementById('fixNutritionNote').hidden = true;
+  }
+}
+
+/** Turn nutrient keys into the labels the compliance panel already uses, so
+ * the note reads "Carbohydrate" rather than "carb_g". */
+function nutrientLabels(view, keys) {
+  const rows = view.compliance || [];
+  return (keys || [])
+    .map((k) => (rows.find((r) => r.key === k) || {}).label_en || k)
+    .join(', ');
+}
+
+/** Re-solve every day in the visible week that fell short of AKG.
+ *
+ * A plain regenerate would return the same trays: nothing about the problem
+ * changed. The backend instead reverses the objective's priority for these
+ * days — normally overspending is penalised above missing a floor, which is
+ * why a tight pagu produces a short day in the first place — so what comes
+ * back is a genuinely different tray with a genuinely different price.
+ *
+ * That makes this a cost decision, not a retry, so the note underneath
+ * reports the per-portion overspend rather than quietly absorbing it. Days
+ * are repaired one at a time because each solve excludes the rest of the
+ * week, and a repaired day changes what the next one must avoid.
+ */
+async function fixShortDays() {
+  const btn = document.getElementById('fixNutritionBtn');
+  const note = document.getElementById('fixNutritionNote');
+  const short = currentWeekDays().filter((d) => d.adequacy < MEETS_AKG_THRESHOLD
+                                                && !attemptedRepair.has(d.key));
+  if (!short.length) return;
+
+  btn.disabled = true;
+  note.hidden = false;
+  note.textContent = `Rebuilding ${short.length} day${short.length === 1 ? '' : 's'}…`;
+
+  const fixed = [];
+  const stillShort = [];
+  let extraPerPortion = 0;
+
+  for (const view of short) {
+    const before = view.cost_per_portion_idr;
+    attemptedRepair.add(view.key);
+    try {
+      const day = await api.improveDay({ run_id: view.runId, day_index: view.dayIndex });
+      // Same shape as review()'s replacement_day: solved in isolation, so it
+      // carries no plan-wide relaxation list of its own.
+      Object.assign(view, day, { index: view.dayIndex, relaxations: [] });
+      const info = day.improvement || {};
+      if (info.meets_standard) fixed.push(view.name);
+      else {
+        const labels = nutrientLabels(view, info.remaining_shortfalls);
+        stillShort.push(labels ? `${view.name} (${labels})`
+                               : `${view.name} (just under, nothing materially short)`);
+      }
+      extraPerPortion += Math.max(0, (day.cost_per_portion_idr || 0) - before);
+    } catch (err) {
+      stillShort.push(`${view.name} (${err.message})`);
+    }
+  }
+
+  reaggregateWeekProcurement(state.weeks[currentWeekIndex]);
+  renderTray();
+  translateVisibleDishNames().then(() => { if (!anyRejectPanelOpen()) renderTray(); });
+
+  const parts = [];
+  if (fixed.length) parts.push(`${fixed.join(', ')} now meet${fixed.length === 1 ? 's' : ''} the standard.`);
+  if (extraPerPortion > 0) {
+    parts.push(`<span class="over">+${formatIDR(Math.round(extraPerPortion / short.length))} per portion</span> on those days.`);
+  }
+  if (stillShort.length) {
+    parts.push(`Still short: ${stillShort.join('; ')}. Open the day to see the size of the gap.`);
+  }
+  note.innerHTML = parts.join(' ');
+  note.hidden = false;
+  toast(fixed.length
+    ? `Rebuilt ${fixed.length} day${fixed.length === 1 ? '' : 's'} to meet the MBG standard.`
+    : "Couldn't reach the standard for those days.");
 }
 
 function findView(key) {
@@ -364,6 +463,9 @@ export async function buildTray() {
   state.weeks = weekRuns;
   state.generatedDays = generatedDays;
   currentWeekIndex = 0;
+  // These are fresh days, whatever the old ones were called — a stale entry
+  // here would grey the repair button out on a plan it never ran against.
+  attemptedRepair.clear();
   // Show the tray the moment the solve is back — its numbers (cost,
   // nutrients, the Indonesian dish names themselves) are already final and
   // correct. The English gloss is a nice-to-have on top, fetched via a real
@@ -864,6 +966,8 @@ async function handleExport(type) {
 export function initPlanTab() {
   document.getElementById('backToTray').addEventListener('click', () => showScreen('screen-3'));
   document.getElementById('detailBackBtn').addEventListener('click', () => showScreen('screen-3'));
+
+  document.getElementById('fixNutritionBtn').addEventListener('click', fixShortDays);
 
   document.getElementById('weekNavPrev').addEventListener('click', () => {
     if (currentWeekIndex <= 0) return;

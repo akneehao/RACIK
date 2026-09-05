@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from .akg import SCHOOL_STAGES, STAGE_LABELS
 from .i18n import DEFAULT_LANG, norm_lang, t
-from .optimizer import PlanResult
+from .optimizer import MEETS_AKG_ADEQUACY, PlanResult
 from .prices import PriceTable
 from .sealion import ChatResult, SeaLionClient, SeaLionError, SeaLionNotConfigured
 
@@ -377,7 +377,7 @@ def validate_plan(result: PlanResult, lang: str = DEFAULT_LANG) -> ValidatorRepo
             "adequacy": round(adequacy, 3),
             "cost_per_portion_idr": round(day.cost_per_portion_idr),
             "within_budget": within_budget,
-            "meets_akg": adequacy >= 0.999,
+            "meets_akg": adequacy >= MEETS_AKG_ADEQUACY,
         })
     passed = (not result.relaxations) and result.budget_overrun_idr <= 0
     if passed:

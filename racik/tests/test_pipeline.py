@@ -361,3 +361,69 @@ def test_a_rating_is_scoped_and_does_not_leak_across_provinces(client):
 
     assert history.rating("Jawa Tengah", "sd", dish_id) == 1.0
     assert history.rating("Papua", "sd", dish_id) is None
+
+
+# ---------------------------------------------------- /api/improve-day
+
+def _short_plan(client):
+    """A five-day plan on a pagu tight enough to force AKG shortfalls."""
+    body = client.post("/api/generate", json={
+        "days": 5, "portions": 100, "province": "Jawa Tengah", "stage": "sd",
+        "budget_mode": "per_portion", "budget_value": 5000}).json()
+    short = [d for d in body["plan"]["days"] if d["adequacy"] < 0.999]
+    assert short, "5000/portion was expected to leave at least one day short"
+    return body, short
+
+
+def test_improve_day_raises_adequacy_and_says_what_it_cost(client):
+    body, short = _short_plan(client)
+    day = short[0]
+
+    res = client.post("/api/improve-day", json={
+        "run_id": body["run_id"], "day_index": day["index"]})
+    assert res.status_code == 200
+    fixed = res.json()
+
+    assert fixed["adequacy"] > day["adequacy"]
+    # The whole point is that this is a cost decision, so the price has to
+    # come back with it rather than being absorbed silently.
+    assert fixed["improvement"]["cost_per_portion_idr"] > day["cost_per_portion_idr"]
+    assert fixed["improvement"]["budget_per_portion_idr"] == 5000
+    assert fixed["index"] == day["index"]
+
+
+def test_improve_day_verdict_agrees_with_the_adequacy_it_reports(client):
+    """meets_standard and the adequacy number must never contradict each
+    other -- the frontend draws its badge from adequacy and its wording from
+    the verdict, and a day cannot be both."""
+    from racik.optimizer import MEETS_AKG_ADEQUACY
+
+    body, short = _short_plan(client)
+    for day in short:
+        fixed = client.post("/api/improve-day", json={
+            "run_id": body["run_id"], "day_index": day["index"]}).json()
+        verdict = fixed["improvement"]["meets_standard"]
+        if verdict:
+            assert fixed["adequacy"] >= MEETS_AKG_ADEQUACY
+            assert not fixed["improvement"]["remaining_shortfalls"]
+
+
+def test_improve_day_does_not_exclude_the_staple(client):
+    """The repair excludes the rest of the week so it doesn't duplicate a
+    neighbouring day -- but only in the slots variety applies to.
+
+    There are a handful of staples for five days, so excluding them across
+    the week starves the repair of exactly the carbohydrate it is usually
+    trying to add. Every repaired day must still come back with a staple.
+    """
+    body, short = _short_plan(client)
+    for day in short:
+        fixed = client.post("/api/improve-day", json={
+            "run_id": body["run_id"], "day_index": day["index"]}).json()
+        assert fixed["slots"].get("staple"), (
+            "day %d came back with no staple" % day["index"])
+
+
+def test_improve_day_rejects_an_unknown_run(client):
+    res = client.post("/api/improve-day", json={"run_id": 999_999, "day_index": 0})
+    assert res.status_code == 422

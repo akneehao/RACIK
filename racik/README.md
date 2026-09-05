@@ -153,6 +153,18 @@ persisted (`racik/data/racik_state.db`, separate from the read-only
 - **Operator review** — `POST /api/review` records an accept/reject + reason
   per day; a reject with `replace: true` re-solves just that day, excluding
   the rejected dishes.
+- **Repairing a short day** — `POST /api/improve-day` re-solves a day the
+  Validator flagged as below AKG. It is not a retry: a re-solve with the same
+  inputs returns the same tray. `W_BUDGET_SLACK` (900) normally sits above
+  `W_NUTRIENT_SLACK` (400) — overspending is worse than falling short, which
+  is precisely why a tight pagu yields a short day — and
+  `PlanRequest.nutrition_priority` reverses that ordering for this one day.
+  So the operator is shown a price, not a promise: the response carries the
+  new per-portion cost against the pagu, and names any nutrient still short.
+  The rest of the week is excluded so the repair does not duplicate a
+  neighbour, but only in the slots variety applies to — excluding staples
+  across a week would starve the repair of the carbohydrate it is usually
+  trying to add.
 - **Menu history / rotation** — every real (non-component) dish served is
   logged; the next `generate()` call excludes anything served in the last 14
   days by default (`history_days`), so a week doesn't quietly repeat itself.
@@ -438,6 +450,7 @@ dozen separate uploads named some variant of "Tempe Mendoan"; constraining on
 | `POST /api/report` | Printable compliance + procurement document |
 | `POST /api/generate` | Preprocessing → Agen Gizi → Agen Biaya → CP-SAT → Validator; persists the run |
 | `POST /api/review` | Operator accept/reject + reason for one day; `replace:true` re-solves it |
+| `POST /api/improve-day` | Re-solve one AKG-short day with the nutrient floors put above the budget |
 | `GET /api/history` | Recently served dishes (menu history) and rejection reasons |
 | `POST /api/stock`, `GET /api/stock` | Stock/actual-cost audit records for a run |
 

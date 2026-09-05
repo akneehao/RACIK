@@ -31,7 +31,8 @@ from .config import MBG, SLOTS, MBGConfig
 from .history import PlanHistory
 from .i18n import DEFAULT_LANG, LANG_NAMES, norm_lang, t
 from .nutrition import COMPONENT_ID_BASE
-from .optimizer import MenuOptimizer, PlanRequest, PlanResult
+from .optimizer import (MATERIAL_SHORTFALL_SHARE, MEETS_AKG_ADEQUACY,
+                        MenuOptimizer, PlanRequest, PlanResult)
 from .prices import PriceTable
 from .procurement import aggregate, totals
 from .sealion import (ORCHESTRATOR_MODEL, ChatResult, SeaLionClient,
@@ -914,6 +915,92 @@ class RacikOrchestrator:
 
         return GenerateResult(run_id=run_id, plan=plan_payload, trace=trace,
                               resolved=resolved)
+
+    def improve_day(self, *, run_id: int, day_index: int,
+                    lang: str = DEFAULT_LANG, state: StateStore) -> dict:
+        """Re-solve one day that came back short of AKG, paying for it.
+
+        A plain re-solve of a short day returns the same tray, because
+        nothing about the problem changed. What makes this different is the
+        objective: W_BUDGET_SLACK (900) normally sits above W_NUTRIENT_SLACK
+        (400), so on a tight pagu the solver deliberately takes the
+        nutritional shortfall rather than overspend. `nutrition_priority`
+        reverses that ordering for this one day.
+
+        So the honest framing for the operator is not "try again" but "this
+        day can meet the standard, and here is what it costs" -- the response
+        carries the new per-portion cost against the pagu so the UI can say so
+        plainly. A shortfall can survive even with budget deprioritised, and
+        the response names the nutrient rather than guessing at a cause: a
+        thin regional pool, the week's exclusions and the interaction between
+        the fat floor and the fat-share ceiling all produce the same symptom.
+        """
+        lang = norm_lang(lang)
+        run = state.run(run_id)
+        if run is None:
+            raise RacikGenerateError(f"run {run_id} not found")
+        resolved = run["resolved"]
+
+        # What this run served on its OTHER days, so the repair does not simply
+        # duplicate a neighbour. The day being repaired is left in: its current
+        # dishes may well be the right ones, and forcing them out would trade a
+        # nutrient shortfall for a worse tray.
+        #
+        # Restricted to the slots variety actually applies to. Excluding a
+        # whole week indiscriminately also excludes the staples, and there are
+        # only a handful of those -- which starves the repair of exactly the
+        # carbohydrate it is usually trying to add. Rice every day is normal
+        # here; PlanRequest.no_repeat_slots draws the same line.
+        varied = set(PlanRequest.no_repeat_slots)
+        elsewhere = {
+            row["dish_id"] for row in state.recent_served(limit=1000)
+            if row["run_id"] == run_id and row["day_index"] != day_index
+            and row["slot"] in varied
+        }
+
+        config = MBGConfig(
+            budget_per_portion_idr=resolved["budget_per_portion_idr"],
+            ingredient_budget_share=resolved["ingredient_budget_share"],
+            regional_cost_index=resolved.get("regional_cost_index", 1.0),
+        )
+        request = PlanRequest(
+            days=1, stage=resolved["stage"], portions=run["portions"],
+            province=resolved["province"], island=resolved.get("island", ""),
+            config=config, exclude_terms=resolved.get("exclude_terms", []),
+            exclude_dish_ids=sorted(elsewhere),
+            enforce_micronutrients=resolved.get("enforce_micronutrients", False),
+            nutrition_priority=True,
+            max_solve_seconds=15.0,
+        )
+        result = self.optimizer.solve(request)
+        if not result.feasible:
+            raise RacikGenerateError(
+                f"no improved menu could be built (status: {result.status})")
+
+        day_payload = serialise_plan(result, lang=lang)["days"][0]
+        day_payload["index"] = day_index
+        day_payload["procurement"] = self._procurement_payload(result)["by_day"][0]
+
+        # What the operator is actually being asked to decide. A nutrient is
+        # only reported short if it missed by something a kitchen could act on
+        # -- see MATERIAL_SHORTFALL_SHARE. The AKG fat floor sits just above
+        # what the 30%-of-energy ceiling allows at exactly the energy target,
+        # so a day that is otherwise perfect routinely carries a fraction of a
+        # gram of fat slack, and calling that a failure would be noise.
+        shortfalls = sorted({r.nutrient for r in result.relaxations
+                             if r.share >= MATERIAL_SHORTFALL_SHARE})
+        day_payload["improvement"] = {
+            "meets_standard": (result.adequacy(result.days[0]) >= MEETS_AKG_ADEQUACY
+                               and not shortfalls),
+            "remaining_shortfalls": shortfalls,
+            "cost_per_portion_idr": round(result.days[0].cost_per_portion_idr),
+            "budget_per_portion_idr": round(
+                config.budget_per_portion_idr * config.ingredient_budget_share),
+        }
+
+        self._persist_served(state, run_id, result, day_index_override=day_index)
+        self._record_rating_history(result, resolved["province"], resolved["stage"])
+        return day_payload
 
     def replace_day(self, *, run_id: int, day_index: int,
                     lang: str = DEFAULT_LANG, state: StateStore) -> dict:

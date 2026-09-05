@@ -788,6 +788,30 @@ def review(body: ReviewBody) -> dict:
     return response
 
 
+class ImproveDayBody(BaseModel):
+    run_id: int
+    day_index: int
+    lang: str = DEFAULT_LANG
+
+
+@app.post("/api/improve-day")
+def improve_day(body: ImproveDayBody) -> dict:
+    """Re-solve one short day with the nutrient floors put above the budget.
+
+    Distinct from /api/review's replace: that one acts on an operator
+    rejecting a day and excludes what it served. This acts on a day the
+    *validator* flagged as short of AKG, keeps its dishes eligible, and
+    changes the objective instead — see RacikOrchestrator.improve_day.
+    """
+    try:
+        day = _orchestrator().improve_day(
+            run_id=body.run_id, day_index=body.day_index,
+            lang=norm_lang(body.lang), state=_state())
+    except RacikGenerateError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return day
+
+
 @app.get("/api/history")
 def history(limit: int = 30) -> dict:
     """Recently served dishes (menu history / rotation) and rejection reasons

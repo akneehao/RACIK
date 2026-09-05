@@ -36,10 +36,38 @@ from .urt import normalize
 NUTRIENT_SCALE = 10       # 0.1 g / 0.1 kcal resolution
 COST_SCALE = 1            # rupiah are already integers
 
+# A day counts as meeting AKG at or above this adequacy. Used by the agents'
+# narration and by improve_day's verdict; the frontend draws its "Meets MBG
+# Standard" badge on the same number, and the two disagreeing is worse than
+# either being slightly wrong.
+MEETS_AKG_ADEQUACY = 0.999
+# The matching rule for a single nutrient: slack under this share of its own
+# target is rounding, not a shortfall. Without it a day sitting at 0.998
+# adequacy -- which the badge calls short, correctly -- gets its verdict from
+# a fraction of a gram of fat, and the repair reports failure for something no
+# kitchen could measure.
+MATERIAL_SHORTFALL_SHARE = 0.01
+
 # Objective weights. Relative magnitudes encode policy: missing a nutrient floor
 # is penalised far above rupiah, and going over budget above that again.
 W_NUTRIENT_SLACK = 400
 W_BUDGET_SLACK = 900
+# The two weights above encode the default policy: overspending is worse than
+# falling short of a floor, so on a tight pagu the solver takes the shortfall.
+# That is the right default -- a kitchen cannot spend money it does not have --
+# but it is a trade the operator should be able to reverse for a specific day.
+# PlanRequest.nutrition_priority swaps in this weight instead, putting a
+# nutrient floor above the budget ceiling so the solve will pay to close it.
+# The size is not arbitrary. After the per-target normalisation below, a
+# nutrient's slack costs `W * 100 / target_scaled` per scaled unit, so for a
+# ~600 kcal energy floor one kcal short costs W/6 against 900 per rupiah of
+# overspend -- i.e. W/5400 rupiah. At W=9000 that is 1.7 rupiah per kcal,
+# which buys almost nothing and leaves the day short anyway; the trade only
+# starts closing real gaps around 40,000, and past that the answer stops
+# moving (40k, 150k and 600k all return the same tray). 60,000 sits in that
+# saturated region with margin, so a floor is closed near-regardless of cost
+# while the cheaper of two trays that both meet it still wins.
+W_NUTRIENT_SLACK_STRICT = 60000
 W_COST = 1
 W_UNDERSPEND = 8
 W_PREFERENCE = 250
@@ -134,6 +162,10 @@ class PlanRequest:
     max_family_per_plan: int = 2            # times one main ingredient may fill a slot
     candidates_per_slot: int = DEFAULT_CANDIDATES_PER_SLOT
     enforce_micronutrients: bool = False    # AKG micro values pending verification
+    nutrition_priority: bool = False        # pay over budget rather than miss a floor.
+                                            # Off by default; the operator turns it on
+                                            # for a day that came back short — see
+                                            # W_NUTRIENT_SLACK_STRICT.
     max_solve_seconds: float = 20.0
     random_seed: int = 0
     recency_weights: dict = field(default_factory=dict)  # dish_id -> 0-1.5+ avoidance
@@ -636,7 +668,9 @@ class MenuOptimizer:
                 model.Add(sum(terms[n]) + slack >= target)
                 # Normalise by the target so a gram of protein short and a gram
                 # of fibre short cost the same, proportionally.
-                weight = max(1, round(W_NUTRIENT_SLACK * 100 / target))
+                base = (W_NUTRIENT_SLACK_STRICT if request.nutrition_priority
+                        else W_NUTRIENT_SLACK)
+                weight = max(1, round(base * 100 / target))
                 penalties.append(weight * slack)
 
             # energy ceiling: a tray 35% over target wastes budget

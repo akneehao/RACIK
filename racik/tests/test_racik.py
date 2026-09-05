@@ -337,6 +337,50 @@ def test_plan_reports_relaxations_instead_of_failing(optimizer):
     assert result.relaxations, "a starved budget must be reported, not hidden"
 
 
+def test_nutrition_priority_buys_its_way_out_of_a_shortfall(optimizer):
+    """The default objective takes a nutritional shortfall over an overspend.
+
+    W_BUDGET_SLACK (900) sits above W_NUTRIENT_SLACK (400) on purpose -- a
+    kitchen cannot spend money it does not have -- which is exactly why a
+    tight pagu produces a short day. nutrition_priority reverses that for one
+    day, and this asserts the reversal is real in both directions: adequacy
+    up, and paid for.
+    """
+    from racik.config import MBGConfig
+    from racik.optimizer import PlanRequest
+
+    tight = MBGConfig(budget_per_portion_idr=5000, ingredient_budget_share=1.0)
+    args = dict(days=1, stage="sd", province="Jawa Tengah", island="Jawa",
+                portions=100, config=tight, max_solve_seconds=20)
+
+    default = optimizer.solve(PlanRequest(**args))
+    assert default.relaxations, "budget must be tight enough to force a shortfall"
+
+    strict = optimizer.solve(PlanRequest(nutrition_priority=True, **args))
+    assert strict.feasible
+    assert strict.adequacy(strict.days[0]) > default.adequacy(default.days[0])
+    assert (strict.days[0].cost_per_portion_idr
+            > default.days[0].cost_per_portion_idr), "closing a floor should cost money"
+
+
+def test_nutrition_priority_does_not_overspend_when_it_need_not(optimizer):
+    """It raises the floor's price, not the menu's. On a budget that already
+    meets AKG there is nothing to buy, and the day must not drift upward."""
+    from racik.config import MBGConfig
+    from racik.optimizer import PlanRequest
+
+    ample = MBGConfig(budget_per_portion_idr=10_000, ingredient_budget_share=1.0)
+    args = dict(days=1, stage="sd", province="Jawa Tengah", island="Jawa",
+                portions=100, config=ample, max_solve_seconds=20)
+
+    default = optimizer.solve(PlanRequest(**args))
+    strict = optimizer.solve(PlanRequest(nutrition_priority=True, **args))
+    assert not default.relaxations
+    assert not strict.relaxations
+    assert (strict.days[0].cost_per_portion_idr
+            <= default.days[0].cost_per_portion_idr * 1.02)
+
+
 def test_variety_no_dish_repeats_within_plan(optimizer):
     from racik.optimizer import PlanRequest, dish_key
     result = optimizer.solve(PlanRequest(days=5, stage="sd",
