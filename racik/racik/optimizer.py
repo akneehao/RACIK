@@ -386,9 +386,15 @@ class MenuOptimizer:
         exclude_ids = set(request.exclude_dish_ids)
         exclude_terms = {t.lower() for t in request.exclude_terms if t.strip()}
 
+        # A tiny tolerance for rounding noise: the bank's cost is the exact
+        # sum of each dish's real per-portion cost, while the precompute
+        # solve's own overrun check used integer-rupiah-rounded costs
+        # internally — the two can disagree by a few rupiah on an otherwise
+        # genuinely-in-budget tray.
+        BUDGET_TOLERANCE_IDR = 5.0
         eligible: list[dict[str, Dish]] = []
         for tray in pool:
-            if tray["cost_per_portion_idr"] > budget:
+            if tray["cost_per_portion_idr"] > budget + BUDGET_TOLERANCE_IDR:
                 continue
             dish_objs = {slot: self.by_id.get(dish_id)
                         for slot, dish_id in tray["dish_ids"].items()}
@@ -404,8 +410,10 @@ class MenuOptimizer:
             return None
 
         # Greedy family-diverse pick — the same max_family_per_plan rule the
-        # live solver enforces, applied here without needing CP-SAT for it.
-        family_count: dict[str, int] = {}
+        # live solver enforces (per slot, not shared across slots — tempe
+        # dominating nabati says nothing about hewani), applied here without
+        # needing CP-SAT for it.
+        family_count: dict[tuple[str, str], int] = {}
         chosen: list[dict[str, Dish]] = []
         for dish_objs in eligible:
             if len(chosen) >= request.days:
@@ -416,7 +424,7 @@ class MenuOptimizer:
                 if d is None:
                     continue
                 fam = d.main_food_code or dish_key(d)
-                if family_count.get(fam, 0) >= request.max_family_per_plan:
+                if family_count.get((slot, fam), 0) >= request.max_family_per_plan:
                     over_cap = True
                     break
             if over_cap:
@@ -426,7 +434,7 @@ class MenuOptimizer:
                 d = dish_objs.get(slot)
                 if d is not None:
                     fam = d.main_food_code or dish_key(d)
-                    family_count[fam] = family_count.get(fam, 0) + 1
+                    family_count[(slot, fam)] = family_count.get((slot, fam), 0) + 1
         if len(chosen) < request.days:
             return None
 
