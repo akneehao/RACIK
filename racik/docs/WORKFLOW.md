@@ -19,7 +19,8 @@ layout.
    before the solver ever runs.
 3. **Agen Gizi** (nutrition agent) and **4. Agen Biaya** (budget agent) run
    **in parallel** (`ThreadPoolExecutor`, `orchestrator.py`), each a single
-   structured tool call to AWS Bedrock (`anthropic.claude-3-haiku`):
+   structured tool call to AWS Bedrock
+   (`us.anthropic.claude-haiku-4-5-20251001-v1:0`):
    - *Agen Gizi* reads the school stage, free-text allergy/preference notes,
      and the operator's last 20 rejections (dish + reason). It never
      computes nutrition — it outputs nutrient-floor emphasis and

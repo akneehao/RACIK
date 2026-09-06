@@ -1,0 +1,4 @@
+# There is one dependency set, and it lives with the package it installs.
+# This file exists so `pip install -r requirements.txt` works from the repo
+# root as well as from racik/.
+-r racik/requirements.txt

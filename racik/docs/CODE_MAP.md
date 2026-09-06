@@ -148,6 +148,30 @@ numbers without their caveats.
 
 ---
 
+### 15. What the reading order above does not reach
+
+The fourteen files above are the spine: raw data in, a costed menu out. These
+ten sit around it and are best read once that spine makes sense.
+
+| File | Read it when you want to know |
+|---|---|
+| `agents.py` | How Agen Gizi and Agen Biaya author constraints, how their numbers are clamped, and what the Validator recomputes |
+| `serialize.py` | The exact JSON a plan becomes — one place, shared by `/api/plan` and the `generate()` pipeline |
+| `statedb.py` | Where operator review, the served log and the stock audit are persisted |
+| `history.py` | The other memory: served dishes, 1-5 star ratings, pantry — and how a rating becomes a repetition penalty |
+| `substitution.py` | The Reviewer agent: core-vs-flexible by mass share, and why it only proposes substitutes it looked up |
+| `recipes.py` | Recipe Workshop — raw ingredient text to a dish the solver will actually consider |
+| `recipe_text.py` | Scraped Indonesian steps to professional English, and the rule-based cleanup used with no model |
+| `bedrock_converse.py`, `bedrock_native.py`, `anthropic_client.py` | The provider clients behind `bedrock.make_client()` |
+
+Two of these carry decisions worth understanding before changing them.
+`history.py` makes repetition a *weight*, never a ban — a 1-star dish is pushed
+away, not removed, so a thin province cannot be starved of candidates by
+feedback. And `recipe_text.py` probes the client's signature before passing
+`chat_template_kwargs`, because that option exists only on SEA-LION and raised
+`TypeError` on every other provider — which silently pinned the English rewrite
+to one vendor.
+
 ## Where to look first, by question
 
 | Question | File | Symbol |

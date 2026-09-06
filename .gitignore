@@ -1,1 +1,22 @@
+# Secrets. Both .env files are read at startup (racik/racik/config.py loads
+# racik/.env first, then this one as a fallback) — see .env.example.
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Build artefacts. `racik/scripts/package.py` rebuilds the shippable language
+# bundles on demand; a 13 MB pair of zips in git goes stale immediately.
+racik/dist/
+
+# Editors / tooling / OS
+.claude/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -52,8 +52,12 @@ In the Space itself: **Settings -> Repository secrets** (or "Variables and
 secrets"), add whichever provider you're using right now:
 
 ```
-RACIK_LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=<your key from console.anthropic.com>
+RACIK_LLM_PROVIDER=bedrock
+BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<from the AWS access portal>
+AWS_SECRET_ACCESS_KEY=<from the AWS access portal>
+AWS_SESSION_TOKEN=<from the AWS access portal>
 ```
 
 or, once you have working Bedrock credentials:

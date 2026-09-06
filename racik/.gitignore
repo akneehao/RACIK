@@ -29,3 +29,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# Shippable language bundles, rebuilt by scripts/package.py on demand.
+dist/

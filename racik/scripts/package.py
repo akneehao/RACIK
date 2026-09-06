@@ -8,7 +8,7 @@ rewrites exactly two marked lines per build:
     ui/index.html   const DEFAULT_LANG = "…";  /* BUILD:DEFAULT_LANG */
     racik/i18n.py   DEFAULT_LANG = "…"         # BUILD:DEFAULT_LANG
 
-and swaps in the matching README. Everything else is byte-identical.
+Everything else, the README included, is byte-identical between the two.
 
 `data/racik.db` is deliberately excluded: it is a 66 MB derived artefact that
 `scripts/build_db.py` regenerates in about 30 seconds from the raw sources that
@@ -42,8 +42,10 @@ EXCLUDE_NAMES = {"__pycache__", ".pytest_cache", "dist", "racik.db",
                  ".DS_Store", "Thumbs.db"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".zip", ".log"}
 
-README_FOR = {"id": "README.id.md", "en": "README.md"}
-OTHER_README = {"id": "README.md", "en": "README.id.md"}
+# One README, at the repo root — the per-language pair this used to swap was
+# consolidated away. Both language bundles ship the same document; the build
+# still differs in the DEFAULT_LANG markers rewritten below.
+REPO_README = ROOT.parent / "README.md"
 
 UI_MARKER = re.compile(r'(const DEFAULT_LANG = ")(id|en)(";\s*/\* BUILD:DEFAULT_LANG \*/)')
 PY_MARKER = re.compile(r'(^DEFAULT_LANG = ")(id|en)(".*$)', re.M)
@@ -90,17 +92,16 @@ def _set_default_language(staging: Path, lang: str) -> None:
 
 
 def _set_readme(staging: Path, lang: str) -> None:
-    """Promote the language's README to README.md, keep the other alongside."""
-    primary = staging / README_FOR[lang]
-    other = staging / OTHER_README[lang]
-    shutil.copy2(ROOT / README_FOR[lang], primary)
-    shutil.copy2(ROOT / OTHER_README[lang], other)
-    if lang == "id":                       # README.id.md becomes README.md
-        readme = (staging / "README.id.md").read_text(encoding="utf-8")
-        english = (staging / "README.md").read_text(encoding="utf-8")
-        (staging / "README.md").write_text(readme, encoding="utf-8")
-        (staging / "README.en.md").write_text(english, encoding="utf-8")
-        (staging / "README.id.md").unlink()
+    """Ship the repo's README with the bundle.
+
+    `lang` is still taken so the signature matches the rest of the per-language
+    build steps, and so a future language-specific README is a one-line change
+    here rather than a restructure of the caller.
+    """
+    if not REPO_README.exists():
+        raise SystemExit("README.md not found at %s — packaging would ship a "
+                         "bundle with no documentation." % REPO_README)
+    shutil.copy2(REPO_README, staging / "README.md")
 
 
 def _verify(staging: Path, lang: str) -> None:
@@ -114,7 +115,6 @@ def _verify(staging: Path, lang: str) -> None:
         staging / "data" / "raw" / "TKPI_2020_Table_4_All_Data.csv",
         staging / "data" / "raw" / "Indonesian_Recipes_HF_Regional.xlsx",
         staging / "scripts" / "build_db.py",
-        staging / "docs" / "architecture.svg",
     ]
     missing = [str(p.relative_to(staging)) for p in checks if not p.exists()]
     if missing:

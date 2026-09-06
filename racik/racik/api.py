@@ -913,11 +913,3 @@ elif UI_DIR.exists():
 if UI_DIR.exists():
     app.mount("/agent", StaticFiles(directory=UI_DIR, html=True), name="agent-ui")
 
-
-_ARCHITECTURE_SVG = PROJECT_DIR / "docs" / "architecture.svg"
-
-if _ARCHITECTURE_SVG.exists():
-    @app.get("/architecture.svg", include_in_schema=False)
-    def architecture() -> FileResponse:
-        """The system diagram, served from docs/ so there is one copy of it."""
-        return FileResponse(_ARCHITECTURE_SVG, media_type="image/svg+xml")
