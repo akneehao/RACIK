@@ -1,13 +1,3 @@
----
-title: Racik
-emoji: 🍚
-colorFrom: green
-colorTo: yellow
-sdk: docker
-app_port: 8000
-pinned: false
----
-
 # Racik
 
 AI-powered meal planning for Indonesia's **Makan Bergizi Gratis** (MBG) free
