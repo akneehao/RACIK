@@ -17,6 +17,7 @@ the module docstring note in translate.py for the same design rationale.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from dataclasses import dataclass, field
@@ -168,6 +169,24 @@ class StepsTranslator:
 
         return RecipeSteps(dish_id, rule_clean(raw_steps), "rule")
 
+    def _extra_kwargs(self) -> dict:
+        """SEA-LION-only chat options, omitted for clients that reject them.
+
+        `chat_template_kwargs` is a vLLM extension, not part of the OpenAI
+        schema, so passing it to Bedrock/Anthropic raises TypeError before a
+        request is ever made. Probing the signature keeps SEA-LION's
+        thinking-disabled behaviour (reasoning tokens otherwise eat the whole
+        max_tokens budget and the model returns empty content) without making
+        every other provider an error path.
+        """
+        try:
+            params = inspect.signature(self.client.chat).parameters
+        except (TypeError, ValueError):          # a stub/mock with no signature
+            return {}
+        if "chat_template_kwargs" in params:
+            return {"chat_template_kwargs": {"enable_thinking": False}}
+        return {}
+
     def _ask_model(self, raw_steps: str) -> list[str]:
         try:
             reply = self.client.chat(
@@ -185,8 +204,7 @@ class StepsTranslator:
                 # chase an ever-larger token ceiling — confirmed on the exact
                 # recipe that failed: 234 tokens, correct output, no
                 # truncation risk left.
-                temperature=0.0, max_tokens=1500,
-                chat_template_kwargs={"enable_thinking": False})
+                temperature=0.0, max_tokens=1500, **self._extra_kwargs())
             self.calls += 1
         except SeaLionError as exc:
             self.last_error = str(exc)

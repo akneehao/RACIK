@@ -654,13 +654,25 @@ def _translator() -> DishTranslator:
 
 @lru_cache(maxsize=1)
 def _steps_translator() -> StepsTranslator:
-    # Deliberately hosted SEA-LION (SeaLionClient's own default), not
-    # make_client()/Bedrock: the source text is Bahasa Indonesia home-cook
-    # notes, and SEA-LION is trained specifically on Southeast Asian
-    # languages — a better fit for this rewrite than the general-purpose
-    # model driving Agen Gizi/Agen Biaya. Needs SEALION_API_KEY in .env;
-    # falls back to the same-language rule-based cleanup without one.
-    return StepsTranslator()
+    """Prefer hosted SEA-LION, but do not hold the feature hostage to it.
+
+    SEA-LION first is a real judgement, not an accident: the source is Bahasa
+    Indonesia home-cook prose, and SEA-LION is trained on Southeast Asian
+    languages, so it rewrites this better than a general-purpose model.
+
+    It used to be the ONLY option, and that quietly broke the feature for
+    anyone on a different provider. With Bedrock configured and working, the
+    orchestrator, both agents and the dish-name translator all ran on it while
+    "How to Prepare" alone stayed in Indonesian and reported "AI rewrite
+    unavailable" — indistinguishable from a bug, because functionally it was
+    one. Falling through to whatever IS configured keeps the preference and
+    drops the hostage-taking; with nothing configured at all, both paths land
+    on the same rule-based cleanup as before.
+    """
+    preferred = SeaLionClient()
+    if preferred.configured:
+        return StepsTranslator(client=preferred)
+    return StepsTranslator(client=make_client())
 
 
 @lru_cache(maxsize=1)

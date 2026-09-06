@@ -79,3 +79,54 @@ class TestChatter:
         # filters do, a method that contains cooking must not vanish.
         assert rule_clean("Rebus air. Masukkan mie. Siap disantap.") == [
             "Rebus air", "Masukkan mie"]
+
+
+class TestProviderPortability:
+    """The rewriter must work on whatever provider is configured.
+
+    It used to pass `chat_template_kwargs` on every call. That is a
+    vLLM/SEA-LION extension, so on Bedrock or Anthropic the call raised
+    TypeError before a request was ever made — which is why "How to Prepare"
+    stayed Indonesian for a team running Bedrock while every other LLM feature
+    in the app worked.
+    """
+
+    def test_sealion_still_gets_thinking_disabled(self):
+        from racik.recipe_text import StepsTranslator
+        from racik.sealion import SeaLionClient
+
+        extra = StepsTranslator(client=SeaLionClient())._extra_kwargs()
+        assert extra == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def test_a_client_without_that_option_is_not_handed_it(self):
+        from racik.recipe_text import StepsTranslator
+
+        class PlainClient:
+            configured = True
+
+            def chat(self, messages, tools=None, temperature=0.0, max_tokens=None):
+                return None
+
+        assert StepsTranslator(client=PlainClient())._extra_kwargs() == {}
+
+    def test_the_call_itself_survives_a_plain_client(self):
+        """The regression, end to end: a rewrite against a Bedrock-shaped
+        signature must produce steps rather than raising TypeError."""
+        import json
+        from pathlib import Path
+        import tempfile
+
+        from racik.recipe_text import StepsTranslator
+        from racik.sealion import ChatResult
+
+        class PlainClient:
+            configured = True
+
+            def chat(self, messages, tools=None, temperature=0.0, max_tokens=None):
+                return ChatResult(content=json.dumps({"steps": ["Fry the fish."]}))
+
+        t = StepsTranslator(client=PlainClient(),
+                            cache_path=Path(tempfile.mktemp(suffix=".json")))
+        out = t.translate(1, "Goreng ikannya.")
+        assert out.source == "llm"
+        assert out.steps == ["Fry the fish."]

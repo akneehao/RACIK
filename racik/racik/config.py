@@ -6,6 +6,7 @@ Sources are cited inline so a reviewer can trace every number to a document.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------- paths
@@ -16,11 +17,41 @@ PROJECT_DIR = PKG_DIR.parent
 # before anything reads os.environ for a provider key/model id — bedrock.py's
 # make_client() and friends read lazily at call time, but config.py is the
 # first module every other module imports, so this always runs first.
-try:
-    from dotenv import load_dotenv
-    load_dotenv(PROJECT_DIR / ".env")
-except ImportError:                # dotenv is optional; real env vars still work
-    pass
+def _load_env_file(path) -> None:
+    """Read a .env, tolerating the shell prefixes people actually paste.
+
+    python-dotenv understands `export NAME=value` but not Windows'
+    `SET NAME=value`, and the AWS access portal hands out credentials in
+    exactly that form. dotenv skips those lines with a parse warning, so a
+    freshly-pasted session token loaded as nothing at all and the app reported
+    "no LLM configured" -- the failure looked like broken code rather than an
+    unreadable line. Anything already in the real environment wins, so this
+    never overrides a variable the process was started with.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        for prefix in ("set ", "export "):
+            if key.lower().startswith(prefix):
+                key = key[len(prefix):].strip()
+                break
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
+
+
+# racik/.env first so it wins, then the repo root as a fallback: the team's
+# AWS session credentials live in the top-level .env (the one the Supabase
+# scripts already use). Both are gitignored; see .env.example.
+_load_env_file(PROJECT_DIR / ".env")
+_load_env_file(PROJECT_DIR.parent / ".env")
 
 DATA_DIR = PROJECT_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
