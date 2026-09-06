@@ -403,6 +403,109 @@ function bindDayCellEvents(row) {
   });
 }
 
+/** Mean attainment per nutrient across the visible week, as horizontal bars
+ * against a 100% AKG reference line.
+ *
+ * Horizontal because the categories are words ("Carbohydrate", "Vitamin A"),
+ * and a bar per nutrient because the job is comparing magnitudes against one
+ * shared reference, not showing change over time.
+ *
+ * Colour alone does NOT carry the met/short distinction here. The app's green
+ * (#43A047) and red (#C0392B) separate by only dE 5.8 under deuteranopia --
+ * below the usable floor -- so every bar also states its percentage, sits
+ * visibly short of or past the 100% line, and carries a marker when it misses.
+ * Advisory nutrients are hatched rather than tinted, because "not enforced" is
+ * a different kind of fact from "short" and must not read as a third status.
+ */
+function renderNutritionProfile(days) {
+  const chart = document.getElementById('profileChart');
+  if (!chart) return;
+  const scope = document.getElementById('profileScope');
+  const sub = document.getElementById('profileSub');
+
+  if (!days.length || !days[0].compliance) {
+    chart.innerHTML = '';
+    if (scope) scope.textContent = '';
+    return;
+  }
+
+  // Average each nutrient over the week. Every day carries the same nutrient
+  // keys, so the first day's rows define the order and the labels.
+  const rows = days[0].compliance.map((ref) => {
+    const pcts = days
+      .map((d) => (d.compliance || []).find((c) => c.key === ref.key))
+      .filter(Boolean)
+      .map((c) => c.pct);
+    const mean = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : 0;
+    const values = days
+      .map((d) => (d.compliance || []).find((c) => c.key === ref.key))
+      .filter(Boolean);
+    const meanValue = values.length
+      ? values.reduce((a, c) => a + Number(c.value), 0) / values.length : 0;
+    return {
+      key: ref.key,
+      label: ref.label_en || ref.key,
+      unit: ref.unit || '',
+      target: ref.target,
+      value: Math.round(meanValue * 10) / 10,
+      pct: Math.round(mean),
+      binding: ref.binding !== false,
+    };
+  });
+
+  if (scope) {
+    scope.textContent = `${days.length} day${days.length === 1 ? '' : 's'}`;
+  }
+  if (sub) {
+    const shortCount = rows.filter((r) => r.binding && r.pct < 100).length;
+    sub.textContent = shortCount
+      ? `Mean attainment against the AKG target. ${shortCount} enforced nutrient${shortCount === 1 ? '' : 's'} below target.`
+      : 'Mean attainment against the AKG target. Every enforced nutrient is met.';
+  }
+
+  // Fixed 200% ceiling rather than the data's own maximum. Scaling to the
+  // maximum let one outlier set the axis -- vitamin C routinely lands near
+  // 400%, which squeezed the four enforced nutrients into the left quarter of
+  // the chart where their distance from the target could not be read. For a
+  // kitchen, 300% and 400% of a micronutrient are the same fact ("plenty");
+  // what carries information is proximity to 100%. Bars past the cap are
+  // drawn full width and marked, and every bar states its true figure.
+  const CEILING = 200;
+  const linePos = (100 / CEILING) * 100;
+
+  // The engine models every nutrient as a floor (akg.py's NUTRIENT_META
+  // carries no direction), but sodium is a ceiling -- AKG states it as a
+  // maximum. Presenting "251% of target" for it the way 251% protein is
+  // presented would tell a kitchen that a salty week is a good week. Flagged
+  // here in the view; giving the solver a real ceiling is a larger change.
+  const LIMITS = new Set(['sodium_mg']);
+
+  chart.innerHTML = `
+    <div class="profile-rows">
+      ${rows.map((r) => {
+        const isLimit = LIMITS.has(r.key);
+        const overLimit = isLimit && r.pct > 100;
+        const status = !r.binding ? 'advisory' : r.pct >= 100 ? 'met' : 'short';
+        const over = r.pct > CEILING;
+        const width = Math.max(1, (Math.min(r.pct, CEILING) / CEILING) * 100);
+        const title = `${r.label}: ${r.value}${r.unit} of ${r.target}${r.unit} `
+          + `${isLimit ? 'limit' : 'target'} (${r.pct}%)`
+          + (overLimit ? ' \u2014 over the recommended maximum' : '');
+        return `
+          <div class="profile-row" title="${title}">
+            <span class="p-label">${r.label}${isLimit ? ' <i class="p-lim">(limit)</i>' : ''}${
+              r.binding ? '' : '<i class="p-adv" aria-hidden="true">*</i>'}</span>
+            <span class="p-track" style="--line-pos:${linePos}%">
+              <span class="p-bar ${status}${over ? ' over' : ''}" style="width:${width}%"></span>
+            </span>
+            <span class="p-val ${overLimit ? 'over-limit' : status}">${r.pct}%${
+              status === 'short' ? ' <b aria-label="below target">\u25BC</b>'
+              : overLimit ? ' <b aria-label="over the limit">\u25B2</b>' : ''}</span>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
 function renderTray() {
   // Clamp in case the plan shrank (e.g. a regenerate with fewer weeks) out
   // from under whichever week was showing.
@@ -421,6 +524,7 @@ function renderTray() {
   });
   bindDayCellEvents(row);
   updateWeekMetrics(days);
+  renderNutritionProfile(days);
   updateTraySubline(days.length);
   updateWeekNav();
   refreshStatus();
@@ -443,6 +547,11 @@ export async function buildTray() {
       budget_mode: state.budgetMode,
       budget_value: state.budgetValue,
       notes: state.notes,
+      // Explicit, not left to Agen Gizi to infer from free text — every plan
+      // was otherwise solved against SD's AKG figures whatever level the
+      // kitchen actually serves.
+      stage: state.stage,
+      target_overrides: state.targetOverrides,
       lang: 'en',
     };
     const result = await api.generate(body);
@@ -522,6 +631,111 @@ function formatMass(grams) {
   return grams >= 1000 ? `${(grams / 1000).toFixed(2)} kg` : `${Math.round(grams)} g`;
 }
 
+/** Clicking an ingredient asks the Reviewer agent what can be done about it.
+ *
+ * This is the "customize the ingredients" gesture, and the honest answer is
+ * usually not "here is a replacement": the agent first says whether the
+ * ingredient is CORE to the dish (by mass share), because swapping the fish
+ * out of a fish dish is not a substitution, it is a different dish. Only when
+ * it is peripheral does it offer to drop or replace it — and only from real
+ * lookups in the corpus, never an invented name.
+ */
+function bindIngredientReview(list) {
+  list.querySelectorAll('.ing-row').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      li.querySelectorAll('.ing-verdict').forEach((n) => n.remove());
+      // A second click closes it, so the list does not fill up with panels.
+      if (btn.classList.contains('open')) { btn.classList.remove('open'); return; }
+      list.querySelectorAll('.ing-row.open').forEach((b) => b.classList.remove('open'));
+      list.querySelectorAll('.ing-verdict').forEach((n) => n.remove());
+      btn.classList.add('open');
+
+      const note = document.createElement('div');
+      note.className = 'ing-verdict';
+      note.textContent = 'Checking…';
+      li.appendChild(note);
+
+      try {
+        const v = await api.substitute({
+          dish_id: Number(btn.dataset.dish),
+          ingredient: btn.dataset.ingredient,
+          province: state.province,
+          lang: 'en',
+        });
+        const share = v.mass_share != null ? `${Math.round(v.mass_share * 100)}% of the dish by mass` : '';
+        const verdict = v.is_core
+          ? `<b class="core">Core ingredient</b> — ${share}. Changing it changes what the dish is.`
+          : `<b class="flex">Flexible</b> — ${share}.`;
+        // Both come back as food records, not names — {code, name, group,
+        // energy_kcal, protein_g, fat_g}. Show the protein figure alongside:
+        // for a core ingredient that is the number deciding whether the swap
+        // holds the tray's animal-protein floor.
+        const foodName = (f) => (f && f.name) || '';
+        const offer = v.substitute
+          ? `<div class="ing-offer">Suggested: <b>${foodName(v.substitute)}</b>` +
+            ` <span class="ing-macro">${v.substitute.protein_g}g protein / 100g</span></div>`
+          : v.action === 'drop'
+            ? '<div class="ing-offer">Can be left out.</div>'
+            : '';
+        const alts = (v.candidates || []).length > 1
+          ? `<div class="ing-alts">Other options: ${
+              v.candidates.slice(1, 5).map(foodName).filter(Boolean).join(', ')}</div>`
+          : '';
+        note.innerHTML = `${verdict}${offer}${alts}` +
+          `<div class="ing-reason">${v.reason || ''}</div>` +
+          (v.source === 'fallback'
+            ? '<div class="ing-reason muted">Rule-based review — no model configured.</div>' : '');
+      } catch (err) {
+        note.textContent = `Couldn't review that ingredient: ${err.message}`;
+      }
+    });
+  });
+}
+
+/** Swap one slot's dish for the next-best candidate, keeping the rest of the
+ * day as it is. Deliberately scoped: a full re-solve would rebalance every
+ * other slot too, which is not what "I'd rather not serve this" means. */
+async function swapSlotDish(slot, view, btn) {
+  const week = state.weeks.find((w) => w.runId === view.runId);
+  const resolved = week ? week.resolved : null;
+  if (!resolved) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Finding an alternative…';
+
+  const day_slots = {};
+  Object.keys(view.slots || {}).forEach((k) => {
+    day_slots[k] = view.slots[k] ? view.slots[k].dish_id : null;
+  });
+
+  try {
+    const day = await api.swap({
+      day_index: view.dayIndex,
+      slot,
+      day_slots,
+      stage: resolved.stage,
+      province: resolved.province,
+      island: resolved.island || '',
+      portions: state.people,
+      budget_per_portion_idr: resolved.budget_per_portion_idr,
+      ingredient_budget_share: resolved.ingredient_budget_share ?? 1,
+      exclude_terms: resolved.exclude_terms || [],
+      target_overrides: state.targetOverrides,
+      lang: 'en',
+    });
+    Object.assign(view, day, { index: view.dayIndex, relaxations: [] });
+    reaggregateWeekProcurement(week);
+    renderTray();
+    await showDetail(view);
+    toast('Swapped. The rest of the day is unchanged.');
+  } catch (err) {
+    toast(`Couldn't swap that dish: ${err.message}`);
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 async function renderIngredientList(elId, dish, portions) {
   const el = document.getElementById(elId);
   el.innerHTML = '<li><span>Loading…</span></li>';
@@ -534,12 +748,24 @@ async function renderIngredientList(elId, dish, portions) {
     el.innerHTML = (detail.ingredients || [])
       .map((ing) => {
         const original = ing.tkpi_name || ing.name || ing.raw;
+        // Display and lookup want DIFFERENT names. The panel shows the
+        // canonical TKPI name ("Ikan cakalang, segar"), but /api/substitute
+        // matches against the recipe's own wording — handed the TKPI name it
+        // answers "does not appear in this dish" and reports 0% mass, which
+        // reads as a confident wrong answer rather than a failed lookup.
+        const lookup = ing.name || ing.raw || original;
         const gloss = state.dishGlosses[original] || original;
         const sub = gloss !== original ? `<span class="ing-name-id">${original}</span>` : '';
-        return `<li><span>${gloss}${sub}</span>` +
-          `<span class="amt">${formatMass(ing.gross_g * scale)}</span></li>`;
+        // The button carries the ORIGINAL corpus name, not the English
+        // gloss: /api/substitute matches against the ingredient index, which
+        // is Indonesian, so sending the gloss would look up nothing.
+        return `<li><button type="button" class="ing-row" data-ingredient="${
+          lookup.replace(/"/g, '&quot;')}" data-dish="${dish.dish_id}">` +
+          `<span>${gloss}${sub}</span>` +
+          `<span class="amt">${formatMass(ing.gross_g * scale)}</span></button></li>`;
       })
       .join('') || '<li><span>No ingredient data</span></li>';
+    bindIngredientReview(el);
     return detail;
   } catch (err) {
     el.innerHTML = `<li><span>Couldn't load ingredients (${err.message})</span></li>`;
@@ -731,6 +957,16 @@ export async function showDetail(view) {
 
   renderDishRating('mainDishRating', main, resolved);
   renderDishRating('sideDishRating', side, resolved);
+
+  [['mainDishSwap', 'hewani', main], ['sideDishSwap', 'sayur', side]].forEach(
+    ([id, slot, dish]) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.hidden = !dish;
+      btn.disabled = false;
+      btn.textContent = 'Swap this dish';
+      btn.onclick = () => swapSlotDish(slot, view, btn);
+    });
 
   showScreen('screen-4');   // show immediately; ingredient/step panels fill in as they load
 

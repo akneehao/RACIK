@@ -56,22 +56,57 @@ untranslated in the final text — a professional kitchen SOP has no casual \
 first-person voice at all.
 """
 
-_NOISE_LINE = re.compile(
-    r"^\W*$|tadaaa+|lumayan|selamat (mencoba|makan)|semoga (suka|berhasil)|"
-    r"jangan lupa (like|subscribe|follow)",
+# Scraped posts use a run of underscores or dashes as a visual divider
+# between photo steps. The `^\W*$` branch below cannot catch them:
+# `_` is a word character, so a line of underscores is `\w+`. They also
+# sit inline rather than on their own line, so one survives into the middle
+# of the step that follows -- which is how "_____ Goreng ikan manyung asap"
+# reaches the kitchen's How to Prepare panel.
+_DIVIDER = re.compile(r"[_=~*\u00b7\u2014\u2013-]{3,}")
+
+# Emoji and pictographs. Dropped rather than kept: a step is read off a
+# screen in a working kitchen, and they also let a closing aside pass as an
+# instruction just by carrying a word the noise filter does not know.
+_EMOJI = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF\uFE0F\u2764]")
+
+# Structural: the part is punctuation or whitespace only. Safe to test with
+# a full match, and safe to drop outright.
+_EMPTY_LINE = re.compile(r"^\W*$")
+
+# Chatter aimed at followers rather than a kitchen. Deliberately matched
+# only inside a SHORT part: a great many scraped recipes carry no sentence
+# punctuation at all, so the split below yields one part holding the whole
+# method, and searching that for chatter deletes the entire recipe over one
+# stray phrase. A sign-off is its own short sentence; an instruction that
+# merely contains "siap disantap" is not.
+_CHATTER = re.compile(
+    r"tadaaa+|lumayan|selamat (mencoba|makan)|semoga (suka|berhasil)|"
+    r"jangan lupa (like|subscribe|follow)|"
+    r"sungguh (nikmat|enak)|pasti nambah|enak(nya)? banget|"
+    r"jadi dec?h|siap (disantap|dinikmati)|met mencoba|happy cooking",
     re.IGNORECASE)
+CHATTER_MAX_CHARS = 60
 
 
 def rule_clean(raw: str) -> list[str]:
     """Same-language cleanup with no model available: strips scrape noise and
     splits into sentences. Still Indonesian — never claims to be a translation."""
     text = re.sub(r">>\s*", "", str(raw or ""))
+    # Before the whitespace collapse, or a divider glues itself to the step
+    # that follows instead of disappearing.
+    text = _DIVIDER.sub(" ", text)
+    text = _EMOJI.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
     parts = re.split(r"(?<=[.!?])\s+|\n+", text)
     steps = []
     for part in parts:
         part = part.strip(" .!?")
-        if not part or _NOISE_LINE.search(part):
+        # A part that was only a divider or emoji is empty by now.
+        if not part or _EMPTY_LINE.match(part):
+            continue
+        if len(part) <= CHATTER_MAX_CHARS and _CHATTER.search(part):
             continue
         steps.append(part[:1].upper() + part[1:])
     return steps[:MAX_STEPS]

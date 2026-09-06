@@ -742,6 +742,7 @@ class RacikOrchestrator:
                 stage: Optional[str], budget_mode: str, budget_value: float,
                 notes_text: str, exclude_dish_ids: Optional[list[int]] = None,
                 history_days: int = 14, lang: str = DEFAULT_LANG,
+                target_overrides: Optional[dict] = None,
                 state: StateStore) -> GenerateResult:
         """Preprocessing -> Agen Gizi -> Agen Biaya -> CP-SAT -> Validator ->
         persisted menu plan (workflow-diagram stages 2-6).
@@ -810,8 +811,15 @@ class RacikOrchestrator:
         rejected_ids = {int(f["dish_id"]) for f in feedback}
         exclude_ids = {int(i) for i in (exclude_dish_ids or [])} | recent_ids | rejected_ids
 
+        # Only keys the engine knows, and only real numbers -- this comes
+        # straight off a form. optimizer.PlanRequest.target_overrides replaces
+        # the AKG figure per key; anything left out keeps the AKG default.
+        overrides = {k: float(v) for k, v in (target_overrides or {}).items()
+                     if k in NUTRIENT_META and isinstance(v, (int, float))
+                     and float(v) > 0}
         resolved = {
             "stage": resolved_stage, "province": province_r, "island": island,
+            "target_overrides": overrides,
             "budget_per_portion_idr": config.budget_per_portion_idr,
             "ingredient_budget_share": config.ingredient_budget_share,
             "regional_cost_index": config.regional_cost_index,
@@ -826,6 +834,7 @@ class RacikOrchestrator:
             exclude_terms=resolved["exclude_terms"],
             exclude_dish_ids=list(exclude_ids),
             enforce_micronutrients=resolved["enforce_micronutrients"],
+            target_overrides=overrides,
             max_solve_seconds=25.0,
         )
         result = self.optimizer.solve(request)
@@ -845,6 +854,7 @@ class RacikOrchestrator:
                 exclude_terms=resolved["exclude_terms"],
                 exclude_dish_ids=list(narrower_ids),
                 enforce_micronutrients=resolved["enforce_micronutrients"],
+                target_overrides=overrides,
                 max_solve_seconds=25.0,
             )
             retried = self.optimizer.solve(retry_request)
@@ -869,6 +879,7 @@ class RacikOrchestrator:
                 exclude_terms=[],
                 exclude_dish_ids=list(exclude_ids),
                 enforce_micronutrients=resolved["enforce_micronutrients"],
+                target_overrides=overrides,
                 max_solve_seconds=25.0,
             )
             retried = self.optimizer.solve(retry_request)

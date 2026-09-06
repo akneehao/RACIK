@@ -24,6 +24,15 @@ export const state = {
   budgetMode: 'per_portion',    // 'total' | 'per_portion'
   budgetValue: 14000,
   notes: '',
+  // School level the kitchen serves. AKG targets differ sharply by stage
+  // (PAUD 467 kcal vs SMA 833), so leaving this to Agen Gizi to infer from
+  // free text meant every plan was solved against SD's figures by default.
+  stage: 'sd',
+  stages: [],                    // [{key, label, targets{}}] from /api/meta
+  nutrients: [],                 // [{key, label_en, unit, binding}] from /api/meta
+  // Nutrient targets the operator typed over the AKG default, {key: number}.
+  // Only keys they actually edited; everything else keeps the AKG figure.
+  targetOverrides: {},
 
   // generated plan — one entry per calendar week, in onboarding order
   weeks: [],                     // [{ runId, resolved, trace }]

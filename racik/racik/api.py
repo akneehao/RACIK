@@ -737,6 +737,11 @@ class GenerateBody(BaseModel):
     exclude_dish_ids: list[int] = []    # operator vetoes carried from a prior run
     history_days: int = Field(14, ge=0, le=60)   # rotation/decay window
     lang: str = DEFAULT_LANG
+    # Operator-edited nutrient targets, e.g. {"protein_g": 22}. Same contract
+    # as PlanBody.target_overrides: a number a person typed, replacing the AKG
+    # figure for that key only. Unknown keys and non-positive values are
+    # dropped in the orchestrator rather than trusted.
+    target_overrides: dict[str, float] = {}
 
 
 @app.post("/api/generate")
@@ -750,7 +755,7 @@ def generate(body: GenerateBody) -> dict:
             budget_value=body.budget_value, notes_text=body.notes,
             exclude_dish_ids=body.exclude_dish_ids,
             history_days=body.history_days, lang=norm_lang(body.lang),
-            state=_state())
+            target_overrides=body.target_overrides, state=_state())
     except RacikGenerateError as exc:
         raise HTTPException(422, str(exc)) from exc
     return result.to_dict()

@@ -44,6 +44,15 @@ export const api = {
    * reached the standard and what it now costs per portion. */
   improveDay: (body) => request('POST', '/api/improve-day', body),
 
+  /** Ask the Reviewer agent whether one ingredient in a dish can be
+   * dropped or swapped, and for what. Returns its verdict plus the mass
+   * share it based that on — the agent proposes only from real lookups. */
+  substitute: (body) => request('POST', '/api/substitute', body),
+
+  /** Replace one slot's dish with the next-best candidate from the same
+   * ranked pool, holding the rest of the day fixed. */
+  swap: (body) => request('POST', '/api/swap', body),
+
   /** Recently served dishes (menu history) and rejection reasons. */
   history: (limit = 30) => request('GET', `/api/history?limit=${limit}`),
 

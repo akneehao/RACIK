@@ -205,6 +205,131 @@ function initPeopleStepper() {
 // un-toggled without disturbing free text that happens to mention the same word.
 const CHIP_CLAUSE = /^tanpa [^.\n]*\.\s*/;
 
+/** Render the school-level chips and the AKG target editor beneath them.
+ *
+ * Called once /api/meta lands, because both are driven entirely by what the
+ * backend says the stages and nutrients are — hardcoding either would let the
+ * form drift from the engine's own AKG table, which is the one thing an
+ * operator overriding a nutrition floor must be able to trust.
+ *
+ * Only BINDING nutrients are editable. The advisory ones (calcium, iron,
+ * zinc, the vitamins) are not enforced by the solver at all — offering a box
+ * that changes nothing would be worse than offering nothing.
+ */
+function updateStageSummary() {
+  const stageEl = document.getElementById('sumStage');
+  const targetsEl = document.getElementById('sumTargets');
+  const found = state.stages.find((st) => st.key === state.stage);
+  if (stageEl) stageEl.textContent = found ? found.label : state.stage.toUpperCase();
+  if (!targetsEl) return;
+  const n = Object.keys(state.targetOverrides).length;
+  // Name the overridden nutrients rather than counting them: an operator who
+  // set a protein floor needs to see that on the summary they check before
+  // generating, not "2 overridden".
+  targetsEl.textContent = n
+    ? Object.keys(state.targetOverrides)
+        .map((k) => {
+          const meta = state.nutrients.find((x) => x.key === k);
+          return `${meta ? meta.label_en : k} ${state.targetOverrides[k]}`;
+        })
+        .join(', ')
+    : 'AKG default';
+}
+
+export function renderStageAndTargets() {
+  const chips = document.getElementById('stageChips');
+  if (!chips || !state.stages.length) return;
+
+  chips.innerHTML = state.stages
+    .map((st) => `<button type="button" class="chip${st.key === state.stage ? ' selected' : ''}"
+                    data-stage="${st.key}">${st.label}</button>`)
+    .join('');
+  chips.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      state.stage = chip.dataset.stage;
+      // A target typed against SD's 616 kcal means nothing against SMA's 833,
+      // so switching level clears the overrides rather than carrying numbers
+      // across to a scale they were never chosen for.
+      state.targetOverrides = {};
+      renderStageAndTargets();
+      updateStageSummary();
+    });
+  });
+
+  renderTargetInputs();
+}
+
+function stageTargets() {
+  const found = state.stages.find((st) => st.key === state.stage);
+  return found ? found.targets : {};
+}
+
+function renderTargetInputs() {
+  const grid = document.getElementById('targetsGrid');
+  const reset = document.getElementById('targetsReset');
+  if (!grid) return;
+
+  const defaults = stageTargets();
+  const binding = state.nutrients.filter((n) => n.binding && defaults[n.key] != null);
+
+  grid.innerHTML = binding.map((n) => {
+    const akg = defaults[n.key];
+    const set = state.targetOverrides[n.key];
+    const edited = set != null && Math.abs(set - akg) > 0.05;
+    return `
+      <label class="target-field${edited ? ' edited' : ''}">
+        <span class="target-name">${n.label_en}</span>
+        <span class="target-input">
+          <input type="number" min="0" step="0.1" data-nutrient="${n.key}"
+                 value="${set != null ? set : akg}" aria-label="${n.label_en} target">
+          <span class="target-unit">${n.unit}</span>
+        </span>
+        <span class="target-akg">${edited ? `AKG ${akg}` : 'AKG default'}</span>
+      </label>`;
+  }).join('');
+
+  grid.querySelectorAll('input[data-nutrient]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const key = input.dataset.nutrient;
+      const value = parseFloat(input.value);
+      const akg = defaults[key];
+      // Back at the AKG figure is not an override — drop it so the request
+      // carries only what the operator actually changed.
+      if (!Number.isFinite(value) || value <= 0 || Math.abs(value - akg) <= 0.05) {
+        delete state.targetOverrides[key];
+      } else {
+        state.targetOverrides[key] = value;
+      }
+      renderTargetInputs();
+      updateStageSummary();
+    });
+  });
+
+  if (reset) reset.hidden = !Object.keys(state.targetOverrides).length;
+}
+
+function initTargetsPanel() {
+  const toggle = document.getElementById('targetsToggle');
+  const grid = document.getElementById('targetsGrid');
+  const reset = document.getElementById('targetsReset');
+  if (!toggle || !grid) return;
+
+  toggle.addEventListener('click', () => {
+    const open = grid.hidden;
+    grid.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.textContent = open ? 'Hide targets' : 'Edit targets';
+  });
+
+  if (reset) {
+    reset.addEventListener('click', () => {
+      state.targetOverrides = {};
+      renderTargetInputs();
+      updateStageSummary();
+    });
+  }
+}
+
 function initNotesField() {
   const el = document.getElementById('notesInput');
   if (!el) return;
@@ -259,6 +384,12 @@ async function loadMeta() {
   try {
     const meta = await api.meta();
     state.provinces = meta.provinces;
+    state.stages = meta.stages || [];
+    state.nutrients = meta.nutrients || [];
+    renderStageAndTargets();
+    // The summary ran once at startup with no stage labels to read from, so
+    // it showed the bare key ("sd"). Refresh now that meta has the labels.
+    updateStageSummary();
     renderLocationSuggestions(document.getElementById('locationInput').value);
   } catch (err) {
     // The app still works with no regional preference if /api/meta is
@@ -275,6 +406,8 @@ export function initOnboarding(onGenerate) {
   initBudgetControls();
   initPeopleStepper();
   initNotesField();
+  initTargetsPanel();
+  updateStageSummary();
   initGenerateButton(onGenerate);
 
   // clicking the onboarding stepper labels jumps between screens (handy while demoing)

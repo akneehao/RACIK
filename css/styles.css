@@ -217,6 +217,35 @@
   .chip:hover:not(.selected){ border-color:var(--leaf); color:var(--ink); }
   #allergyChips{ margin-bottom:12px; }
 
+  /* School level + AKG target editor. The targets grid stays collapsed by
+     default: overriding a nutrition floor is a deliberate act, not something
+     to stumble into while setting a headcount. */
+  .link-toggle{
+    background:none; border:none; padding:0; cursor:pointer; font:inherit;
+    font-size:12.5px; font-weight:700; color:var(--leaf); text-decoration:underline;
+  }
+  .link-toggle:hover{ color:var(--leaf-dark); }
+  .link-toggle.danger{ color:var(--chili); margin-top:10px; }
+
+  .targets-grid{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));
+    gap:12px; margin-top:12px;
+  }
+  .target-field{ display:flex; flex-direction:column; gap:4px; }
+  .target-name{ font-size:12.5px; font-weight:700; color:var(--ink); }
+  .target-input{ display:flex; align-items:center; gap:6px; }
+  .target-input input{
+    width:100%; min-width:0; padding:8px 10px; border:1.5px solid var(--line);
+    border-radius:10px; font:inherit; font-size:14px; background:var(--paper);
+  }
+  .target-input input:focus{ outline:none; border-color:var(--leaf); }
+  .target-unit{ font-size:12px; color:var(--ink-soft); white-space:nowrap; }
+  .target-akg{ font-size:11px; color:var(--ink-soft); }
+  /* An edited floor is the one thing on this screen that overrides published
+     national guidance, so it is marked rather than left to look like a default. */
+  .target-field.edited .target-input input{ border-color:var(--gold); background:#FFFCF5; }
+  .target-field.edited .target-akg{ color:var(--gold); font-weight:700; }
+
   .custom-recurrence{
     display:none; margin-top:18px; background:var(--paper-dim); border-radius:12px; padding:18px 20px;
   }
@@ -467,6 +496,37 @@
   .dish-badge.main{ background:var(--gold-soft); color:#7A5313; }
   .dish-badge.side{ background:#DCEBDF; color:var(--leaf-dark); }
 
+  .dish-head-right{ display:flex; align-items:center; gap:10px; }
+  .btn-swap{
+    border:1.5px solid var(--line); background:var(--paper); color:var(--ink-soft);
+    padding:5px 12px; border-radius:100px; font:inherit; font-size:11.5px;
+    font-weight:700; cursor:pointer;
+  }
+  .btn-swap:hover:not(:disabled){ border-color:var(--leaf); color:var(--leaf); }
+  .btn-swap:disabled{ opacity:0.6; cursor:default; }
+
+  /* Ingredients are buttons: clicking one asks the Reviewer agent whether it
+     is core to the dish and what could replace it. Kept visually identical to
+     the old static rows until hover, so the list still reads as a list. */
+  .ingredient-list .ing-row{
+    display:flex; width:100%; align-items:baseline; justify-content:space-between;
+    gap:10px; background:none; border:none; padding:0; font:inherit; text-align:left;
+    color:inherit; cursor:pointer;
+  }
+  .ingredient-list .ing-row:hover span:first-child{ color:var(--leaf); text-decoration:underline; }
+  .ingredient-list .ing-row.open span:first-child{ color:var(--leaf); font-weight:700; }
+  .ing-verdict{
+    margin:8px 0 4px; padding:10px 12px; background:var(--paper-dim);
+    border-radius:10px; font-size:12px; line-height:1.5; color:var(--ink-soft);
+  }
+  .ing-verdict b.core{ color:var(--chili); }
+  .ing-verdict b.flex{ color:var(--leaf); }
+  .ing-offer{ margin-top:6px; color:var(--ink); }
+  .ing-macro{ font-size:11px; color:var(--ink-soft); }
+  .ing-alts{ margin-top:4px; }
+  .ing-reason{ margin-top:6px; font-style:italic; }
+  .ing-reason.muted{ opacity:0.75; font-style:normal; font-size:11px; }
+
   /* Operator's 1-5 star verdict on a dish they served. Feeds the next
      solve's repetition penalty (history.py), so it is a real input, not a
      decoration — hence the explicit saved/failed status text beside it. */
@@ -496,9 +556,15 @@
   @media (max-width: 900px){ .dish-grid{ grid-template-columns:1fr; } }
 
   .ingredient-list{ list-style:none; margin:0; padding:0; }
+  /* Column, not row: `.ing-row` is itself a full-width flex row that lays the
+     name and amount out, so the li only has to stack that against the
+     substitution verdict that opens beneath it. As a row, the verdict landed
+     beside the ingredient and overlapped the next column. */
   .ingredient-list li{
-    display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px dashed var(--line); font-size:14px;
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding:9px 0; border-bottom:1px dashed var(--line); font-size:14px;
   }
+  .ingredient-list li:not(:has(.ing-row)){ flex-direction:row; }
   .ingredient-list li .amt{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); font-size:13px; }
   .ingredient-list li .ing-name-id{ display:block; font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
 
@@ -507,6 +573,65 @@
   .nutri-item{ display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:13.5px; }
   .nutri-item .bar-track{ width:70px; height:6px; background:#E3DCC5; border-radius:100px; overflow:hidden; margin-left:8px; }
   .nutri-item .bar-fill{ height:100%; background:var(--leaf); }
+
+  /* ---- Nutrition profile (plan screen) --------------------------------
+     Status colours here are NOT sufficient on their own: #43A047 and
+     #C0392B separate by only dE 5.8 under deuteranopia. Every bar therefore
+     also carries its percentage, its position against the 100% line, and a
+     marker when it falls short. Advisory nutrients are hatched rather than
+     given a third colour -- "not enforced" is a different kind of fact from
+     "short" and must not read as another status. */
+  .profile-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .profile-head h3{ margin:0; }
+  .profile-scope{ font-size:12px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
+
+  .profile-rows{ display:flex; flex-direction:column; gap:7px; margin-top:6px; }
+  .profile-row{ display:grid; grid-template-columns:150px 1fr 62px; align-items:center; gap:10px; }
+  .p-label{ font-size:12.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .p-adv{ color:var(--ink-soft); font-style:normal; }
+  .p-track{ position:relative; height:10px; background:#E3DCC5; border-radius:100px; overflow:hidden; }
+  /* The AKG reference, drawn per track so its percentage resolves against the
+     bar's own width rather than the row's. Sits over the fill: a bar that
+     crosses it should be seen crossing it. */
+  .p-track::after{
+    content:""; position:absolute; top:-2px; bottom:-2px; left:var(--line-pos);
+    width:1px; background:var(--ink); opacity:0.55; pointer-events:none;
+  }
+  .p-bar{ display:block; height:100%; border-radius:0 4px 4px 0; min-width:2px; }
+  .p-bar.met{ background:var(--leaf-bright); }
+  .p-bar.short{ background:var(--chili); }
+  /* Past the 200% cap: a notched end says the bar is clipped, so a full-width
+     bar is never mistaken for "exactly at the ceiling". The figure beside it
+     stays exact. */
+  .p-bar.over{ border-radius:0; -webkit-mask-image:linear-gradient(to right, #000 calc(100% - 7px), transparent calc(100% - 7px)); mask-image:linear-gradient(to right, #000 calc(100% - 7px), transparent calc(100% - 7px)); }
+  /* Texture, not tint: readable in print, in forced-colors, and to a reader
+     who cannot separate the two status hues at all. */
+  .p-bar.advisory{
+    background:repeating-linear-gradient(45deg,
+      var(--ink-soft) 0 3px, transparent 3px 6px), #CFD6CD;
+  }
+  .p-val{
+    font-family:'JetBrains Mono',monospace; font-size:11.5px; text-align:right;
+    color:var(--ink-soft);
+  }
+  .p-val.short{ color:var(--chili); font-weight:700; }
+  .p-val.over-limit{ color:var(--gold); font-weight:700; }
+  .p-lim{ font-style:normal; font-size:11px; color:var(--ink-soft); }
+  .p-val b{ font-size:9px; }
+
+  .profile-legend{ display:flex; flex-wrap:wrap; gap:16px; margin-top:14px; }
+  .profile-legend .lg{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-soft); }
+  .profile-legend .sw{ width:14px; height:10px; border-radius:3px; display:inline-block; }
+  .profile-legend .sw.met{ background:var(--leaf-bright); }
+  .profile-legend .sw.short{ background:var(--chili); }
+  .profile-legend .sw.advisory{
+    background:repeating-linear-gradient(45deg,
+      var(--ink-soft) 0 3px, transparent 3px 6px), #CFD6CD;
+  }
+
+  @media (max-width: 640px){
+    .profile-row{ grid-template-columns:104px 1fr 54px; }
+  }
   .compliance{
     margin-top:12px; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700; padding-top:10px; border-top:1px solid #E3DCC5;
   }
