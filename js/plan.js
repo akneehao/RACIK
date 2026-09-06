@@ -21,6 +21,8 @@ const WEEKDAY_NAMES = { M: 'Monday', T1: 'Tuesday', W: 'Wednesday', T2: 'Thursda
 // The five real Isi Piringku tray slots, in the visual order the mockup's
 // card lays them out (vegetable, main/animal-protein, fruit, staple, then
 // the "extra" box repurposed to show the real plant-protein dish).
+// Reading order across the tray: vegetable, main and fruit along the top,
+// then the carbohydrate's wide well and the complement beneath them.
 const CARD_SLOT_ORDER = ['sayur', 'hewani', 'buah', 'staple', 'nabati'];
 const CARD_SLOT_CSS = { sayur: 'slot-veg', hewani: 'slot-main', buah: 'slot-fruit',
                         staple: 'slot-staple', nabati: 'slot-extra' };
@@ -82,7 +84,7 @@ function slotCardHtml(view, slot) {
     return `
       <div class="slot ${CARD_SLOT_CSS[slot]} slot-empty">
         <span class="slot-eyebrow">${label}</span>
-        <span class="slot-name">Not planned this day</span>
+        <span class="slot-name" title="Not planned this day">&mdash;</span>
       </div>`;
   }
   const gloss = glossFor(dish.name);
@@ -135,9 +137,12 @@ function dayCardHtml(view) {
     </div>
     <div class="day-top">
       <span class="day-name">${view.name}</span>
-      <div class="status-btns">
-        <button class="yes" data-key="${view.key}" aria-label="Accept menu for ${view.name}">✓</button>
-        <button class="no" data-key="${view.key}" aria-label="Reject menu for ${view.name}">✕</button>
+      <div class="day-top-right">
+        <span class="day-portion-cost">${formatIDR(view.cost_per_portion_idr)}</span>
+        <div class="status-btns">
+          <button class="yes" data-key="${view.key}" aria-label="Accept menu for ${view.name}">✓</button>
+          <button class="no" data-key="${view.key}" aria-label="Reject menu for ${view.name}">✕</button>
+        </div>
       </div>
     </div>
     ${rejectPanelHtml(view)}

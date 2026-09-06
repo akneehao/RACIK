@@ -368,6 +368,12 @@
     display:flex; justify-content:space-between; align-items:center;
     padding:14px 16px 10px;
   }
+  .day-top-right{ display:flex; align-items:center; gap:10px; }
+  .day-portion-cost{
+    font-family:'JetBrains Mono',monospace; font-size:12.5px; font-weight:700;
+    color:var(--ink-soft); white-space:nowrap;
+  }
+
   .day-name{ font-family:'Fraunces',serif; font-weight:700; font-size:16px; }
   .status-btns{ display:flex; gap:6px; }
   .status-btns button{
@@ -377,44 +383,96 @@
   .status-btns button.yes.active{ background:var(--leaf); border-color:var(--leaf); color:#fff; }
   .status-btns button.no.active{ background:var(--chili); border-color:var(--chili); color:#fff; }
 
+  /* ---- The tray -------------------------------------------------------
+     Five compartments in the Isi Piringku reading order: vegetable, main and
+     fruit along the top, then the carbohydrate's wide well and the complement
+     beneath. Flat white compartments on a light tray — the earlier version
+     modelled a melamine tray with moulded food in each well, which read as
+     decoration competing with the dish names. The tray here is the frame; the
+     dish is the content.
+
+     border-radius / background / border only — no inset shadow or elliptical
+     radius — because this subtree is rasterised by html2canvas for the PNG
+     and PDF exports, which drops both. */
   .meal-tray{
     margin:0 14px 14px;
-    background: linear-gradient(155deg, #E3D9BC, #D9CDA9);
-    border-radius:16px;
-    padding:10px;
-    box-shadow: inset 0 2px 4px rgba(31,43,34,0.15), inset 0 -2px 0 rgba(255,255,255,0.4), 0 1px 0 rgba(255,255,255,0.5);
+    padding:8px;
+    border-radius:14px;
+    background:#F1EFE6;
+    border:1px solid #E5E1D4;
   }
+
   .slot-grid{
-    display:grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto auto; gap:8px;
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-areas:
+      "veg    main   fruit"
+      "staple staple nabati";
+    gap:8px;
   }
+  .slot.slot-veg   { grid-area:veg; }
+  .slot.slot-main  { grid-area:main; }
+  .slot.slot-fruit { grid-area:fruit; }
+  .slot.slot-staple{ grid-area:staple; }
+  .slot.slot-extra { grid-area:nabati; }
+
   .slot{
-    background: var(--paper-dim); border-radius:9px; padding:12px 12px 10px;
-    display:flex; flex-direction:column; justify-content:space-between; min-height:92px;
-    box-shadow: inset 0 1px 3px rgba(31,43,34,0.08);
+    background:#FFFFFF;
+    border:1px solid #EAE5D6;
+    border-radius:10px;
+    padding:11px 12px 10px;
+    display:flex; flex-direction:column;
+    min-height:104px;
   }
-  .slot.slot-staple, .slot.slot-extra{ grid-column: span 1; }
-  .slot-row-bottom{ display:contents; }
-  .slot .slot-eyebrow{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
-  .slot .slot-name{ font-family:'Fraunces',serif; font-weight:700; font-size:14px; line-height:1.25; margin-top:4px; color:var(--ink); }
-  .slot .slot-name-id{
-    display:block; font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:11px;
-    line-height:1.3; margin-top:1px; color:var(--ink-soft);
-  }
-  .slot .slot-foot{ display:flex; align-items:center; justify-content:space-between; margin-top:8px; gap:4px; flex-wrap:wrap; }
-  .slot .slot-tag{
-    font-size:10px; font-weight:600; padding:2px 8px; border-radius:100px; background:#DCEBDF; color:var(--leaf-dark);
+
+  .slot .slot-eyebrow{
+    font-size:8.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+    color:#A8A392; font-family:'JetBrains Mono',monospace;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .slot .slot-price{ font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--ink); white-space:nowrap; }
-  .slot.slot-empty{ background:transparent; border:1.5px dashed #C9BD9C; align-items:flex-start; position:relative; box-shadow:none; }
-  .slot.slot-empty .slot-name{ color:#A69B7A; font-style:italic; font-weight:500; margin-top:22px; font-family:'Space Grotesk',sans-serif; font-size:12.5px; }
-  .slot.slot-empty .slot-eyebrow{ position:absolute; top:12px; left:12px; }
-
-  @media (max-width:420px){
-    .slot-grid{ grid-template-columns: 1fr 1fr; }
-    .slot.slot-main{ grid-column: span 2; }
+  .slot .slot-name{
+    font-family:'Fraunces',serif; font-weight:700; font-size:14.5px; line-height:1.22;
+    color:var(--ink); margin-top:6px;
+  }
+  .slot .slot-name-id{
+    display:block; font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:10.5px;
+    line-height:1.3; margin-top:2px; color:var(--ink-soft);
+  }
+  /* Region and price share the last line: the region reads as a tag, the
+     price sits hard right where a cook scans for it. */
+  .slot .slot-foot{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:auto; padding-top:10px; gap:6px; flex-wrap:wrap;
+  }
+  .slot .slot-tag{
+    font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:5px;
+    background:#E4EFE2; color:#2F6B36; line-height:1.4;
+  }
+  .slot .slot-price{
+    font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:700;
+    color:var(--ink); white-space:nowrap; margin-left:auto;
   }
 
+  /* An unfilled compartment stays an empty compartment: a dash, not a
+     sentence explaining itself. */
+  .slot.slot-empty{
+    background:#F7F5EC;
+    border:1px dashed #D8D2C0;
+    align-items:flex-start;
+  }
+  .slot.slot-empty .slot-name{
+    color:#B3AC97; font-weight:700; font-size:16px; margin-top:6px;
+  }
+
+  @media (max-width:420px){
+    .slot-grid{
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas:
+        "veg    main"
+        "fruit  nabati"
+        "staple staple";
+    }
+  }
 
   .day-foot{
     display:flex; justify-content:space-between; align-items:center; padding:0 16px 14px; font-size:13px;
