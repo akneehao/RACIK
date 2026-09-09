@@ -13,10 +13,19 @@ layout.
    (where possible) to TKPI 2020 (Tabel Komposisi Pangan Indonesia) for
    nutrition, and priced from a WFP regional price survey via a fallback
    chain (exact commodity → name → ingredient group → generic default).
-2. **Preprocessing** — `optimizer.py`'s G1–G5 gates filter by AKG stage
-   band, region, tray slot, and excluded dish IDs/terms (from operator
-   history), narrowing ~18,000 dishes to a few hundred real candidates
-   before the solver ever runs.
+2. **Preprocessing** — turning raw corpus data into something an agent can
+   reason about, and normalising the request. Step 1's ETL is the bulk of it:
+   free-text ingredient lines parsed, household measures converted to grams,
+   each line linked to TKPI for nutrition and to the price table for cost. At
+   request time `orchestrator.py` adds the small deterministic part — resolve
+   the typed location to a real corpus province and island group, clamp days
+   and portions, convert a total budget into a per-portion figure.
+
+   **Preprocessing does not filter dishes.** That is the agents' job: Agen
+   Gizi authors the `exclude_terms` and Agen Biaya the cost bounds, and the
+   G1–G5 gates in `optimizer.py` then *apply* what they wrote — inside
+   `solve()`, which runs after both agents. A filter cannot precede the agent
+   that defines it.
 3. **Agen Gizi** (nutrition agent) and **4. Agen Biaya** (budget agent) run
    **in parallel** (`ThreadPoolExecutor`, `orchestrator.py`), each a single
    structured tool call to AWS Bedrock
@@ -32,13 +41,21 @@ layout.
      Bedrock is unreachable — the pipeline never breaks for lack of a key.
 5. **CP-SAT solver** (OR-Tools, `optimizer.py`) is the only component that
    computes real numbers — grams, Rupiah, kcal — across 8 parallel search
-   workers. Five macro nutrients (energy, protein, fat, carbohydrate,
-   fibre) are binding: each must reach 100% of target or the shortfall is
-   reported as a relaxation, never hidden. Spend is pulled toward (not past)
-   the budget ceiling via symmetric slack variables. Six micronutrients
-   (calcium, iron, zinc, vitamin A, vitamin C, sodium) are computed and
-   shown for information only — AKG 2019 disagrees on their values across
-   sources, so they're never enforced as constraints.
+   workers. `solve()` first applies the **G1–G5 gates** (slot, source,
+   exclusion terms, operator vetoes, per-slot cost ceiling), narrowing
+   ~18,000 dishes to a few hundred candidates. G3 and G4 are where the
+   agents' output actually bites: the terms come from Agen Gizi, the vetoes
+   from operator review.
+
+   **Four** macro nutrients (energy, protein, fat, carbohydrate) are
+   binding: each must reach 100% of target or the shortfall is reported as a
+   relaxation, never hidden. Spend is pulled toward (not past) the budget
+   ceiling via symmetric slack variables. **Seven** nutrients are advisory —
+   computed and shown, never enforced. Six of them (calcium, iron, zinc,
+   vitamin A, vitamin C, sodium) because AKG 2019 figures disagree across
+   secondary sources; fibre because only ~68% of its TKPI values were
+   measured rather than imputed, so a hard floor on it would optimise
+   against noise (see `data/nutrient_quality.json` and `akg.py`).
 6. **Validator** — a deterministic recheck (not the LLM) of the solved plan
    against AKG 2019 and the budget, producing the plain-language pass/fail
    note attached to every run's trace.

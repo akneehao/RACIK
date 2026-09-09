@@ -766,9 +766,16 @@ class RacikOrchestrator:
 
         trace: list[dict] = [{
             "agent": "preprocessing", "source": "deterministic",
-            "rationale": f"Candidate pool narrowed by gates G1-G5 for "
-                         f"{province_r or 'no regional preference'}.",
-            "params": {"province": province_r, "island": island},
+            "rationale": (
+                f"Request normalised: location resolved to "
+                f"{province_r or 'no regional preference'}"
+                f"{f' ({island})' if island else ''}, {days} day(s) x "
+                f"{portions} portions, budget Rp {budget_per_portion:,.0f} "
+                f"per portion. No dish filtering happens here — the exclusion "
+                f"terms the gates apply are authored by Agen Gizi below."),
+            "params": {"province": province_r, "island": island,
+                       "days": days, "portions": portions,
+                       "budget_per_portion_idr": round(budget_per_portion)},
         }]
 
         # The operator's past reject decisions — "the feedback for the AI
